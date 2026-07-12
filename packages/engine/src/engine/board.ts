@@ -13,7 +13,9 @@ const MULTIPLIER_WEIGHTS: Array<{ type: MultiplierType; weight: number }> = [
   { type: "3X_ARTIST", weight: 3 },
   { type: "CHART_BOOST", weight: 2 },
 ];
-const MULTIPLIER_CELL_COUNT = 16;
+// ~20% of non-starter/anchor cells get a multiplier, scaled to board size
+// rather than a fixed count so this stays sane if GRID_SIZE changes.
+const MULTIPLIER_CELL_RATIO = 0.2;
 
 export function createEmptyBoard(): Board {
   const board: Board = [];
@@ -46,7 +48,7 @@ export function scatterMultipliers(board: Board, rng: () => number): void {
       if (!isStarter && !isAnchor) eligible.push(cell);
     }
   }
-  const count = Math.min(MULTIPLIER_CELL_COUNT, eligible.length);
+  const count = Math.round(eligible.length * MULTIPLIER_CELL_RATIO);
   for (let i = 0; i < count; i++) {
     const idx = randomInt(rng, eligible.length);
     const cell = eligible.splice(idx, 1)[0];

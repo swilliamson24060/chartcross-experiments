@@ -1,4 +1,4 @@
-export const GRID_SIZE = 9;
+export const GRID_SIZE = 7;
 
 export interface SongTile {
   kind: "SONG";
