@@ -13,7 +13,18 @@ import { isStarterPathConnectedToAnchor } from "./graph";
 import { bestConnectionReason, connectionPoints } from "./moves";
 import { createRng, pickRandom, randomInt } from "./rng";
 import { tileValue } from "./tileValue";
-import { Board, ConnectionEdge, Dataset, GameStatus, GRID_SIZE, MoveResult, Tile, WildcardTile } from "./types";
+import {
+  Board,
+  ConnectionEdge,
+  Dataset,
+  GameStatus,
+  GRID_SIZE,
+  MoveResult,
+  PurchaseResult,
+  Tile,
+  WILD_TILE_COST,
+  WildcardTile,
+} from "./types";
 
 const RACK_SIZE = 5;
 const CONNECTABLE_DRAW_BIAS = 0.8; // probability a refill favors a connectable tile
@@ -272,8 +283,13 @@ export class GameEngine {
     cell.tile = tile;
     this.usedIds.add(tile.id);
     this.rack.splice(tileIndex, 1);
-    const refill = this.drawTile();
-    if (refill) this.rack.push(refill);
+    // Only top up to RACK_SIZE - a bought wildcard (see buyWildcard()) can
+    // push the rack above RACK_SIZE, and it should settle back down rather
+    // than being refilled again on the next placement.
+    if (this.rack.length < RACK_SIZE) {
+      const refill = this.drawTile();
+      if (refill) this.rack.push(refill);
+    }
 
     this.score += finalScore;
     this.updateStatus();
@@ -295,5 +311,29 @@ export class GameEngine {
       const j = randomInt(this.rng, i + 1);
       [this.rack[i], this.rack[j]] = [this.rack[j], this.rack[i]];
     }
+  }
+
+  /**
+   * Spends WILD_TILE_COST points to add a wildcard tile to the rack. This
+   * doesn't discard anything - the rack can temporarily exceed RACK_SIZE,
+   * and settles back down naturally as placeTile() only tops it back up to
+   * RACK_SIZE rather than always adding one. Repeatable as long as the
+   * player can afford it.
+   */
+  buyWildcard(): PurchaseResult {
+    if (this.status !== "playing") {
+      return { success: false, reason: "Game over — no purchases allowed.", cost: WILD_TILE_COST, scoreAfter: this.score };
+    }
+    if (this.score < WILD_TILE_COST) {
+      return {
+        success: false,
+        reason: `Not enough points — buying a wild tile costs ${WILD_TILE_COST}.`,
+        cost: WILD_TILE_COST,
+        scoreAfter: this.score,
+      };
+    }
+    this.score -= WILD_TILE_COST;
+    this.rack.push(this.createWildcardTile());
+    return { success: true, cost: WILD_TILE_COST, scoreAfter: this.score };
   }
 }

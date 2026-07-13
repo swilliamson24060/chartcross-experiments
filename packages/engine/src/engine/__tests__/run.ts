@@ -6,7 +6,7 @@ import { isStarterPathConnectedToAnchor } from "../graph";
 import { GameEngine } from "../engine";
 import { decadePoints, tileValue } from "../tileValue";
 import { getAllConnections } from "../connections";
-import { ArtistTile, SongTile, Dataset, MoveResult, WildcardTile } from "../types";
+import { ArtistTile, SongTile, Dataset, MoveResult, WildcardTile, WILD_TILE_COST } from "../types";
 
 let failures = 0;
 function check(label: string, condition: boolean) {
@@ -338,6 +338,96 @@ console.log("\nGame-ending status checks:");
 
   console.log(`  (info) of 15 seeds: ${bridgedCount} bridged, ${stuckCount} stuck, ${15 - bridgedCount - stuckCount} still playing after 200 moves`);
   check("At least one game reached a terminal state across 15 seeds", bridgedCount + stuckCount > 0);
+}
+
+console.log("\nBuy wildcard checks:");
+{
+  // A fresh game starts at score 0, so buying should fail until enough
+  // points are earned from real placements.
+  const engine = new GameEngine(dataset, 4, 42);
+  const zero = engine.buyWildcard();
+  check("Cannot buy a wildcard at 0 points", zero.success === false);
+  check("Failed purchase leaves score untouched", engine.getState().score === 0);
+  check("Failed purchase leaves rack size untouched", engine.getState().rack.length === 5);
+
+  // Play real moves (greedy first-legal-move) until there's enough score to
+  // afford one, or the game ends first.
+  let guard = 0;
+  while (
+    engine.getState().score < WILD_TILE_COST &&
+    engine.getState().status === "playing" &&
+    guard++ < 200
+  ) {
+    const rack = engine.getState().rack;
+    let played = false;
+    for (let i = 0; i < rack.length; i++) {
+      const moves = engine.legalMovesForRackTile(i);
+      if (moves.length > 0) {
+        engine.placeTile(i, moves[0].row, moves[0].col);
+        played = true;
+        break;
+      }
+    }
+    if (!played) break;
+  }
+
+  if (engine.getState().status === "playing" && engine.getState().score >= WILD_TILE_COST) {
+    const scoreBefore = engine.getState().score;
+    const rackSizeBefore = engine.getState().rack.length;
+    const result = engine.buyWildcard();
+    check("Purchase succeeds when affordable", result.success === true);
+    check("Purchase costs exactly WILD_TILE_COST", result.cost === WILD_TILE_COST);
+    check("Score drops by exactly WILD_TILE_COST", engine.getState().score === scoreBefore - WILD_TILE_COST);
+    check("scoreAfter matches the new score", result.scoreAfter === engine.getState().score);
+    check("Rack grows by exactly one tile", engine.getState().rack.length === rackSizeBefore + 1);
+    check(
+      "The newly added tile is a wildcard",
+      engine.getState().rack[engine.getState().rack.length - 1].kind === "WILDCARD",
+    );
+
+    // Play any one tile down and confirm the rack settles back to RACK_SIZE
+    // (5) instead of ballooning further.
+    const rack = engine.getState().rack;
+    let settled = false;
+    for (let i = 0; i < rack.length; i++) {
+      const moves = engine.legalMovesForRackTile(i);
+      if (moves.length > 0) {
+        engine.placeTile(i, moves[0].row, moves[0].col);
+        settled = true;
+        break;
+      }
+    }
+    check("Found a move to confirm the rack settles back down", settled);
+    if (settled) {
+      check("Rack settles back to 5 after playing a tile post-purchase", engine.getState().rack.length === 5);
+    }
+  } else {
+    check("Reached enough score to test a successful purchase within 200 moves", false);
+  }
+}
+
+console.log("\nBuy wildcard blocked once game is over:");
+{
+  // Reuse a seed already known (from the game-ending checks above) to end
+  // via bridging.
+  const engine = new GameEngine(dataset, 3, 0);
+  let guard = 0;
+  while (engine.getState().status === "playing" && guard++ < 200) {
+    const rack = engine.getState().rack;
+    let played = false;
+    for (let i = 0; i < rack.length; i++) {
+      const moves = engine.legalMovesForRackTile(i);
+      if (moves.length > 0) {
+        engine.placeTile(i, moves[0].row, moves[0].col);
+        played = true;
+        break;
+      }
+    }
+    if (!played) break;
+  }
+  check("Game reached a terminal state to test purchase blocking", engine.getState().status !== "playing");
+  const blocked = engine.buyWildcard();
+  check("Purchase rejected once the game is over", blocked.success === false);
 }
 
 console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);

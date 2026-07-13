@@ -1,6 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import type { Tile } from "@chartcross/engine";
+import { WILD_TILE_COST, type Tile } from "@chartcross/engine";
 import { colors } from "../theme";
 import { TileChip } from "./TileChip";
 
@@ -9,16 +9,26 @@ interface Props {
   selectedIndex: number | null;
   onSelect: (index: number) => void;
   onShuffle: () => void;
+  onBuyWild: () => void;
+  canBuyWild: boolean;
 }
 
 const SLOT_SIZE = 56;
 
-export function Rack({ rack, selectedIndex, onSelect, onShuffle }: Props) {
+export function Rack({ rack, selectedIndex, onSelect, onShuffle, onBuyWild, canBuyWild }: Props) {
   return (
     <View>
       <View style={styles.toolbar}>
         <Text style={styles.rackLabel}>RACK</Text>
         <View style={styles.toolbarButtons}>
+          <Pressable
+            onPress={onBuyWild}
+            disabled={!canBuyWild}
+            style={[styles.iconButton, !canBuyWild && styles.iconButtonDisabled]}
+          >
+            <Text style={styles.iconText}>✨</Text>
+            <Text style={styles.iconCaption}>BUY WILD ({WILD_TILE_COST})</Text>
+          </Pressable>
           <Pressable onPress={onShuffle} style={styles.iconButton}>
             <Text style={styles.iconText}>⇄</Text>
             <Text style={styles.iconCaption}>SHUFFLE</Text>
@@ -64,6 +74,9 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     alignItems: "center",
+  },
+  iconButtonDisabled: {
+    opacity: 0.35,
   },
   iconText: {
     fontSize: 20,

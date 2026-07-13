@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { Cell, GameEngine, getAllConnections, GRID_SIZE, MoveResult } from "@chartcross/engine";
+import { Cell, GameEngine, getAllConnections, GRID_SIZE, MoveResult, WILD_TILE_COST } from "@chartcross/engine";
 import { dataset } from "./src/dataset";
 import { colors } from "./src/theme";
 import { BoardGrid } from "./src/components/BoardGrid";
@@ -107,6 +107,17 @@ export default function App() {
     showToast("No legal moves in the current rack — try Shuffle.", true);
   }
 
+  function handleBuyWild() {
+    if (gameState.status !== "playing") return;
+    const result = engineRef.current.buyWildcard();
+    if (!result.success) {
+      showToast(result.reason ?? "Can't buy a wild tile right now.", true);
+      return;
+    }
+    refresh();
+    showToast(`Bought a ★ Wild tile for ${result.cost} pts`);
+  }
+
   function handleRestart() {
     const next = levelNumber + 1;
     setLevelNumber(next);
@@ -165,6 +176,8 @@ export default function App() {
           selectedIndex={selectedIndex}
           onSelect={handleSelectRackTile}
           onShuffle={handleShuffle}
+          onBuyWild={handleBuyWild}
+          canBuyWild={gameState.status === "playing" && gameState.score >= WILD_TILE_COST}
         />
       </ScrollView>
 

@@ -90,6 +90,16 @@ export interface MoveResult {
   status: GameStatus;
 }
 
+/** Cost in points to buy a wildcard tile via GameEngine.buyWildcard(). */
+export const WILD_TILE_COST = 15;
+
+export interface PurchaseResult {
+  success: boolean;
+  reason?: string;
+  cost: number;
+  scoreAfter: number;
+}
+
 export interface Dataset {
   songs: SongTile[];
   artists: ArtistTile[];
