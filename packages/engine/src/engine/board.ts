@@ -101,8 +101,41 @@ export function adjacentCells(board: Board, row: number, col: number): Cell[] {
   return result;
 }
 
+export interface GapPair {
+  gap: Cell;
+  anchor: Cell;
+}
+
+/**
+ * For each orthogonal direction, the empty gap cell one square away and the
+ * occupied anchor cell two squares away - the shape a new tile placement
+ * must fit to be legal under the gap-connector mechanic. Only pairs where
+ * the gap is empty and the anchor is occupied are returned.
+ */
+export function gapNeighbors(board: Board, row: number, col: number): GapPair[] {
+  const deltas = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+  ];
+  const result: GapPair[] = [];
+  for (const [dr, dc] of deltas) {
+    const gapRow = row + dr;
+    const gapCol = col + dc;
+    const anchorRow = row + dr * 2;
+    const anchorCol = col + dc * 2;
+    if (anchorRow < 0 || anchorRow >= GRID_SIZE || anchorCol < 0 || anchorCol >= GRID_SIZE) continue;
+    const gap = board[gapRow][gapCol];
+    const anchor = board[anchorRow][anchorCol];
+    if (gap.tile || !anchor.tile) continue;
+    result.push({ gap, anchor });
+  }
+  return result;
+}
+
 export function tileMatchesMultiplierType(tile: Tile, type: MultiplierType): boolean {
-  if (tile.kind === "WILDCARD") return false; // no bonus of any kind for wildcards
+  if (tile.kind === "WILDCARD" || tile.kind === "CONNECTOR") return false; // no bonus for wildcards or connectors
   if (type === "CHART_BOOST") return true;
   if (type === "2X_SONG" || type === "3X_SONG") return tile.kind === "SONG";
   return tile.kind === "ARTIST";

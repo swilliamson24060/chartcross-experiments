@@ -17,11 +17,11 @@ export function decadePoints(year: number): number {
  * top of whatever connection score it earns). A tile that spans multiple
  * decades - an artist with a long chart history, or a song whose debut and
  * peak fall in different decades - takes the lower of the values, i.e.
- * whichever decade it touches is most recent. Wildcards carry no year data
- * and are worth 0.
+ * whichever decade it touches is most recent. Wildcards and connector
+ * tiles carry no year data and are worth 0.
  */
 export function tileValue(tile: Tile): number {
-  if (tile.kind === "WILDCARD") return 0;
+  if (tile.kind === "WILDCARD" || tile.kind === "CONNECTOR") return 0;
   if (tile.kind === "SONG") {
     return Math.min(decadePoints(tile.debutYear), decadePoints(tile.peakYear));
   }

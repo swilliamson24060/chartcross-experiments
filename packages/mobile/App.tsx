@@ -8,11 +8,19 @@ import {
   View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { Cell, GameEngine, getAllConnections, GRID_SIZE, MoveResult, WILD_TILE_COST } from "@chartcross/engine";
+import {
+  Cell,
+  ConnectionCategory,
+  GameEngine,
+  getAllConnections,
+  GRID_SIZE,
+  WILD_TILE_COST,
+} from "@chartcross/engine";
 import { dataset } from "./src/dataset";
 import { colors } from "./src/theme";
 import { BoardGrid } from "./src/components/BoardGrid";
 import { Rack } from "./src/components/Rack";
+import { ConnectorPicker } from "./src/components/ConnectorPicker";
 import { TileInfoModal } from "./src/components/TileInfoModal";
 import { ConnectionsListModal } from "./src/components/ConnectionsListModal";
 import { GameOverModal } from "./src/components/GameOverModal";
@@ -45,11 +53,12 @@ export default function App() {
   const cellSize = Math.floor(boardPixelWidth / GRID_SIZE);
 
   const connections = useMemo(() => getAllConnections(gameState.board), [gameState]);
+  const pendingConnector = gameState.pendingConnector;
 
   const legalMoves = useMemo(() => {
-    if (selectedIndex === null) return [];
+    if (selectedIndex === null || pendingConnector) return [];
     return engineRef.current.legalMovesForRackTile(selectedIndex);
-  }, [selectedIndex, gameState]);
+  }, [selectedIndex, pendingConnector, gameState]);
 
   const highlightCells = useMemo(
     () => new Set(legalMoves.map((m) => `${m.row},${m.col}`)),
@@ -65,8 +74,24 @@ export default function App() {
     setTimeout(() => setToast((t) => (t?.text === text ? null : t)), 1800);
   }
 
+  function showScoreToast(result: {
+    finalScore: number;
+    connectionScore: number;
+    tileValue: number;
+    multiplierApplied?: string;
+    multiplierMissed?: string;
+  }) {
+    const breakdown = result.tileValue > 0 ? ` (${result.connectionScore} conn + ${result.tileValue} tile)` : "";
+    const multiplier = result.multiplierApplied
+      ? ` [${result.multiplierApplied.replace(/_/g, " ")}]`
+      : result.multiplierMissed
+        ? ` [${result.multiplierMissed.replace(/_/g, " ")} bonus didn't apply]`
+        : "";
+    showToast(`+${result.finalScore} pts${breakdown}${multiplier}`);
+  }
+
   function handleSelectRackTile(index: number) {
-    if (gameState.status !== "playing") return;
+    if (gameState.status !== "playing" || pendingConnector) return;
     setSelectedIndex((current) => (current === index ? null : index));
   }
 
@@ -76,33 +101,49 @@ export default function App() {
       setInfoCell(cell);
       return;
     }
-    if (selectedIndex === null) return;
-    const result: MoveResult = engineRef.current.placeTile(selectedIndex, row, col);
+    if (pendingConnector || selectedIndex === null) return;
+    const result = engineRef.current.placeTile(selectedIndex, row, col);
     if (!result.legal) {
       showToast(result.reason ?? "Illegal move.", true);
       return;
     }
     setSelectedIndex(null);
     refresh();
-    const breakdown = result.tileValue > 0 ? ` (${result.connectionScore} conn + ${result.tileValue} tile)` : "";
-    const multiplier = result.multiplierApplied
-      ? ` [${result.multiplierApplied.replace(/_/g, " ")}]`
-      : result.multiplierMissed
-        ? ` [${result.multiplierMissed.replace(/_/g, " ")} bonus didn't apply]`
-        : "";
-    showToast(`+${result.finalScore} pts${breakdown}${multiplier}`);
+    if (result.resolved) {
+      // Either a real connection scored immediately, or the wildcard fast
+      // path bridged the gap for free - either way there's nothing left to
+      // guess.
+      showScoreToast(result);
+    } else {
+      showToast("Placed — pick a connection type below.");
+    }
     // Terminal states (bridged/stuck) are announced via GameOverModal, driven
     // directly off gameState.status below - no toast needed for those.
   }
 
+  function handleConnectorGuess(type: ConnectionCategory) {
+    if (!pendingConnector) return;
+    const result = engineRef.current.placeConnector(type);
+    refresh();
+    if (!result.legal) {
+      showToast(result.reason ?? "Can't guess right now.", true);
+      return;
+    }
+    if (result.correct) {
+      showScoreToast(result);
+    } else {
+      showToast(`-2 pts — wrong guess, try again.`, true);
+    }
+  }
+
   function handleShuffle() {
-    if (gameState.status !== "playing") return;
+    if (gameState.status !== "playing" || pendingConnector) return;
     engineRef.current.shuffleRack();
     refresh();
   }
 
   function handleHint() {
-    if (gameState.status !== "playing" || selectedIndex !== null) return;
+    if (gameState.status !== "playing" || selectedIndex !== null || pendingConnector) return;
     const state = engineRef.current.getState();
     for (let i = 0; i < state.rack.length; i++) {
       if (engineRef.current.legalMovesForRackTile(i).length > 0) {
@@ -114,7 +155,7 @@ export default function App() {
   }
 
   function handleBuyWild() {
-    if (gameState.status !== "playing") return;
+    if (gameState.status !== "playing" || pendingConnector) return;
     const result = engineRef.current.buyWildcard();
     if (!result.success) {
       showToast(result.reason ?? "Can't buy a wild tile right now.", true);
@@ -134,7 +175,7 @@ export default function App() {
   }
 
   const levelName = LEVEL_NAMES[(levelNumber - 1) % LEVEL_NAMES.length];
-  const canBuyWild = gameState.status === "playing" && gameState.score >= WILD_TILE_COST;
+  const canBuyWild = gameState.status === "playing" && gameState.score >= WILD_TILE_COST && !pendingConnector;
 
   return (
     <View style={styles.app}>
@@ -183,6 +224,9 @@ export default function App() {
             board={gameState.board}
             cellSize={cellSize}
             highlightCells={highlightCells}
+            pendingGapCell={
+              pendingConnector ? { row: pendingConnector.gapRow, col: pendingConnector.gapCol } : null
+            }
             onCellPress={handleCellPress}
           />
         </View>
@@ -191,6 +235,10 @@ export default function App() {
           {toast && (
             <Text style={[styles.toast, toast.error && styles.toastError]}>{toast.text}</Text>
           )}
+        </View>
+
+        <View style={styles.connectorSlot}>
+          <ConnectorPicker active={!!pendingConnector} onGuess={handleConnectorGuess} />
         </View>
 
         <Rack
@@ -291,11 +339,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   toast: {
-    color: colors.year,
+    color: colors.decade,
     fontWeight: "700",
     fontSize: 13,
   },
   toastError: {
     color: colors.illegal,
+  },
+  connectorSlot: {
+    marginBottom: 16,
   },
 });
