@@ -73,7 +73,9 @@ export function BoardGrid({ board, cellSize, highlightCells, onCellPress }: Prop
                   </Text>
                 )}
                 {cell.role === "END_ANCHOR" && (
-                  <Text style={[styles.roleLabel, { color: colors.endAnchor }]}>END ANCHOR</Text>
+                  <Text style={[styles.roleLabel, styles.roleLabelAbove, { color: colors.endAnchor }]}>
+                    END ANCHOR
+                  </Text>
                 )}
               </Pressable>
             );
@@ -108,13 +110,14 @@ const styles = StyleSheet.create({
   },
   roleLabel: {
     position: "absolute",
-    top: -14,
     fontSize: 8,
     fontWeight: "700",
     letterSpacing: 0.5,
   },
+  roleLabelAbove: {
+    top: -14,
+  },
   roleLabelBelow: {
-    top: undefined,
     bottom: -14,
   },
 });
