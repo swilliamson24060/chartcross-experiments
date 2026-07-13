@@ -56,6 +56,14 @@ export interface GameState {
   pendingWildRescue: PendingWildRescue | null;
   /** Wild connector charges bought via buyWildcard(), spendable with useWildcardConnector() or startWildRescue(). */
   wildcardConnectors: number;
+  /**
+   * True once no rack tile has a legal move and there's no wild rescue to
+   * fall back on either (no charges, or no valid rescue spot on the
+   * board). The player must buyWildcard() to open up a rescue, or call
+   * endStuckGame() to give up. Always false with a guess or rescue already
+   * pending - resolve those first.
+   */
+  awaitingStuckDecision: boolean;
 }
 
 interface BestGapEdge {
@@ -107,17 +115,20 @@ export class GameEngine {
   }
 
   /**
-   * Checks for the two ways a game can end. "Bridged" is a pure board
-   * condition (tiles are never removed, so once true it stays true) and is
-   * checked first - if the board is already bridged there's no point
-   * trying to rescue the rack. Otherwise we make a best effort to keep the
-   * rack playable via ensurePlayableRack() before accepting "stuck" - and
-   * even then, a spendable wild connector with somewhere to go
-   * (canWildRescue()) holds off "stuck" too, since the player can still
-   * bridge the board via startWildRescue()/completeWildRescue().
+   * Checks for "bridged", the one way a game ends automatically. It's a
+   * pure board condition (tiles are never removed, so once true it stays
+   * true) - if the board is already bridged there's no point trying to
+   * rescue the rack. Otherwise we make a best effort to keep the rack
+   * playable via ensurePlayableRack().
    *
-   * No-ops once the game is already over: both end states are terminal, so
-   * this should only ever actually transition status once per game.
+   * Running out of legal moves is *not* handled here anymore - it's no
+   * longer an automatic ending. See GameState.awaitingStuckDecision: the
+   * player either rescues via a wild connector (buyWildcard() then
+   * startWildRescue()/completeWildRescue(), or useWildcardConnector() on an
+   * existing pending guess) or explicitly gives up via endStuckGame().
+   *
+   * No-ops once the game is already over: "bridged" is terminal, so this
+   * should only ever actually transition status once per game.
    */
   private updateStatus(): void {
     if (this.status !== "playing") return;
@@ -126,9 +137,6 @@ export class GameEngine {
       return;
     }
     this.ensurePlayableRack();
-    if (!this.hasAnyLegalMove() && !this.canWildRescue()) {
-      this.endGame("stuck");
-    }
   }
 
   private canWildRescue(): boolean {
@@ -244,6 +252,12 @@ export class GameEngine {
       pendingConnector: this.pendingConnector,
       pendingWildRescue: this.pendingWildRescue,
       wildcardConnectors: this.wildcardConnectors,
+      awaitingStuckDecision:
+        this.status === "playing" &&
+        !this.pendingConnector &&
+        !this.pendingWildRescue &&
+        !this.hasAnyLegalMove() &&
+        !this.canWildRescue(),
     };
   }
 
@@ -681,5 +695,27 @@ export class GameEngine {
     this.score -= WILD_TILE_COST;
     this.wildcardConnectors++;
     return { success: true, cost: WILD_TILE_COST, scoreAfter: this.score };
+  }
+
+  /**
+   * Voluntarily ends the game while stuck with no wild rescue available -
+   * the alternative to buyWildcard() (see GameState.awaitingStuckDecision).
+   * Docks the same rack-value penalty as any other stuck ending.
+   */
+  endStuckGame(): WildRescueResult {
+    const illegal = (reason: string): WildRescueResult => ({ legal: false, reason, status: this.status });
+
+    if (this.status !== "playing") {
+      return illegal("Game is already over.");
+    }
+    if (this.pendingConnector || this.pendingWildRescue) {
+      return illegal("Resolve the pending connector guess or rescue placement first.");
+    }
+    if (this.hasAnyLegalMove() || this.canWildRescue()) {
+      return illegal("A move is still available - this is only for when you're truly stuck.");
+    }
+
+    this.endGame("stuck");
+    return { legal: true, status: this.status };
   }
 }
