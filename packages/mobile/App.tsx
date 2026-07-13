@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -357,7 +358,10 @@ const styles = StyleSheet.create({
   app: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingTop: 48,
+    // Web (this app's actual deploy target) has no OS status bar to clear -
+    // that 48px was pure dead space above the header on a phone browser.
+    // Native builds still get real clearance if this is ever run there.
+    paddingTop: Platform.OS === "web" ? 8 : 48,
   },
   header: {
     backgroundColor: colors.headerBackground,
@@ -418,10 +422,10 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   boardWrap: {
-    marginBottom: 8,
+    marginBottom: 2,
   },
   toastSlot: {
-    height: 28,
+    height: 20,
     justifyContent: "center",
   },
   toast: {
@@ -433,6 +437,6 @@ const styles = StyleSheet.create({
     color: colors.illegal,
   },
   connectorSlot: {
-    marginBottom: 16,
+    marginBottom: 6,
   },
 });
