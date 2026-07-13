@@ -3,12 +3,14 @@ import {
   createEmptyBoard,
   GapPair,
   gapNeighbors,
+  hasWildRescueOption,
   multiplierFactor,
   pickTwoDistinctArtists,
   placeStarterAndAnchor,
   relocateMultiplier,
   scatterMultipliers,
   tileMatchesMultiplierType,
+  wildGapPairing,
 } from "./board";
 import { buildDataIndex, DataIndex, findCandidatesFor } from "./dataIndex";
 import { isStarterPathConnectedToAnchor } from "./graph";
@@ -26,10 +28,12 @@ import {
   GRID_SIZE,
   MultiplierType,
   PendingConnector,
+  PendingWildRescue,
   PlaceConnectorResult,
   PlaceTileResult,
   PurchaseResult,
   Tile,
+  WildRescueResult,
   WILD_TILE_COST,
   WildcardTile,
   WRONG_CONNECTOR_PENALTY,
@@ -48,7 +52,9 @@ export interface GameState {
   penaltyApplied: number;
   /** Set while a placed tile is waiting on a connector guess via placeConnector(). */
   pendingConnector: PendingConnector | null;
-  /** Wild connector charges bought via buyWildcard(), spendable with useWildcardConnector(). */
+  /** Set while a wild-rescued gap is waiting on any rack tile via completeWildRescue(). */
+  pendingWildRescue: PendingWildRescue | null;
+  /** Wild connector charges bought via buyWildcard(), spendable with useWildcardConnector() or startWildRescue(). */
   wildcardConnectors: number;
 }
 
@@ -76,6 +82,7 @@ export class GameEngine {
   private pendingConnector: PendingConnector | null = null;
   /** The hidden correct answer for the active pendingConnector; never exposed via getState(). */
   private pendingRequiredReason: ConnectionCategory | null = null;
+  private pendingWildRescue: PendingWildRescue | null = null;
 
   constructor(dataset: Dataset, levelNumber: number, seed?: number) {
     this.dataset = dataset;
@@ -104,7 +111,10 @@ export class GameEngine {
    * condition (tiles are never removed, so once true it stays true) and is
    * checked first - if the board is already bridged there's no point
    * trying to rescue the rack. Otherwise we make a best effort to keep the
-   * rack playable via ensurePlayableRack() before accepting "stuck".
+   * rack playable via ensurePlayableRack() before accepting "stuck" - and
+   * even then, a spendable wild connector with somewhere to go
+   * (canWildRescue()) holds off "stuck" too, since the player can still
+   * bridge the board via startWildRescue()/completeWildRescue().
    *
    * No-ops once the game is already over: both end states are terminal, so
    * this should only ever actually transition status once per game.
@@ -116,9 +126,13 @@ export class GameEngine {
       return;
     }
     this.ensurePlayableRack();
-    if (!this.hasAnyLegalMove()) {
+    if (!this.hasAnyLegalMove() && !this.canWildRescue()) {
       this.endGame("stuck");
     }
+  }
+
+  private canWildRescue(): boolean {
+    return this.wildcardConnectors > 0 && hasWildRescueOption(this.board);
   }
 
   /** Ends the game and docks the score by the value of every tile left in the rack. */
@@ -219,6 +233,7 @@ export class GameEngine {
       levelNumber: this.levelNumber,
       penaltyApplied: this.penaltyApplied,
       pendingConnector: this.pendingConnector,
+      pendingWildRescue: this.pendingWildRescue,
       wildcardConnectors: this.wildcardConnectors,
     };
   }
@@ -277,7 +292,7 @@ export class GameEngine {
   /** All legal (row, col) targets for a given rack tile, with the score a correct connector guess would earn. */
   legalMovesForRackTile(tileIndex: number): Array<{ row: number; col: number; edges: ConnectionEdge[]; finalScore: number }> {
     const tile = this.rack[tileIndex];
-    if (!tile || this.pendingConnector) return [];
+    if (!tile || this.pendingConnector || this.pendingWildRescue) return [];
     const moves: Array<{ row: number; col: number; edges: ConnectionEdge[]; finalScore: number }> = [];
 
     for (let row = 0; row < GRID_SIZE; row++) {
@@ -321,6 +336,9 @@ export class GameEngine {
     }
     if (this.pendingConnector) {
       return illegal("Resolve the pending connector guess before placing another tile.");
+    }
+    if (this.pendingWildRescue) {
+      return illegal("Resolve the pending rescue placement before placing another tile.");
     }
     if (!tile) return illegal("No tile at that rack index.");
     if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) {
@@ -523,6 +541,110 @@ export class GameEngine {
       finalScore,
       status: this.status,
     };
+  }
+
+  /**
+   * Every empty cell that could currently serve as a rescue gap - a placed
+   * tile immediately on one side, empty space immediately on the other.
+   * Only meaningful while hasAnyLegalMove() is false; the UI uses this to
+   * highlight valid taps for startWildRescue().
+   */
+  legalWildRescueGapCells(): Array<{ row: number; col: number }> {
+    const cells: Array<{ row: number; col: number }> = [];
+    for (let row = 0; row < GRID_SIZE; row++) {
+      for (let col = 0; col < GRID_SIZE; col++) {
+        if (this.board[row][col].tile) continue;
+        if (wildGapPairing(this.board, row, col)) cells.push({ row, col });
+      }
+    }
+    return cells;
+  }
+
+  /**
+   * Last-resort rescue when no rack tile has a real legal move: drops a
+   * wild connector into (row, col) - which must be empty, with a placed
+   * tile on one side and empty space on the other - then waits for any
+   * rack tile via completeWildRescue(). Only offered while stuck (see
+   * updateStatus()/canWildRescue()), so it's blocked otherwise to keep it
+   * a genuine last resort rather than a shortcut around real placements.
+   */
+  startWildRescue(row: number, col: number): WildRescueResult {
+    const illegal = (reason: string): WildRescueResult => ({ legal: false, reason, status: this.status });
+
+    if (this.status !== "playing") {
+      return illegal(
+        this.status === "bridged"
+          ? "Game over — STARTER and END_ANCHOR are bridged by a path of touching tiles."
+          : "Game over — no legal moves remain.",
+      );
+    }
+    if (this.pendingConnector) {
+      return illegal("Resolve the pending connector guess before starting a rescue.");
+    }
+    if (this.pendingWildRescue) {
+      return illegal("A rescue placement is already pending.");
+    }
+    if (this.hasAnyLegalMove()) {
+      return illegal("A rescue is only available when no tile has a legal move.");
+    }
+    if (this.wildcardConnectors <= 0) {
+      return illegal("No wild connectors available — buy one first.");
+    }
+    if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) {
+      return illegal("Cell out of bounds.");
+    }
+
+    const pairing = wildGapPairing(this.board, row, col);
+    if (!pairing) {
+      return illegal("That cell must be empty, next to a placed tile, with empty space on the far side.");
+    }
+
+    pairing.gap.tile = this.createWildcardTile();
+    relocateMultiplier(this.board, this.rng, pairing.gap);
+    this.wildcardConnectors--;
+    this.pendingWildRescue = {
+      gapRow: pairing.gap.row,
+      gapCol: pairing.gap.col,
+      contentRow: pairing.content.row,
+      contentCol: pairing.content.col,
+      anchorRow: pairing.anchor.row,
+      anchorCol: pairing.anchor.col,
+    };
+
+    return { legal: true, status: this.status };
+  }
+
+  /**
+   * Finishes an active rescue by dropping any rack tile into the
+   * predetermined content cell - no match is required. Scores nothing: a
+   * rescue is a lifeline to keep the game going, not a way to earn points.
+   * Relocates a multiplier on the content cell rather than wasting it,
+   * same as every other non-scoring placement.
+   */
+  completeWildRescue(tileIndex: number): WildRescueResult {
+    const illegal = (reason: string): WildRescueResult => ({ legal: false, reason, status: this.status });
+
+    if (this.status !== "playing") {
+      return illegal("Game over — no more moves allowed.");
+    }
+    if (!this.pendingWildRescue) {
+      return illegal("No rescue placement is pending.");
+    }
+    const tile = this.rack[tileIndex];
+    if (!tile) return illegal("No tile at that rack index.");
+
+    const pending = this.pendingWildRescue;
+    const contentCell = this.board[pending.contentRow][pending.contentCol];
+
+    contentCell.tile = tile;
+    this.usedIds.add(tile.id);
+    this.rack.splice(tileIndex, 1);
+    relocateMultiplier(this.board, this.rng, contentCell);
+    this.pendingWildRescue = null;
+    this.refillRack();
+    this.updateStatus();
+
+    return { legal: true, status: this.status };
   }
 
   shuffleRack(): void {

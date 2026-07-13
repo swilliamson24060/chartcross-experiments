@@ -139,6 +139,28 @@ export interface PlaceConnectorResult {
   status: GameStatus;
 }
 
+/**
+ * A wild connector has been dropped into a gap cell via
+ * GameEngine.startWildRescue(), and the content cell on its far side is
+ * waiting for any rack tile via GameEngine.completeWildRescue(). Only
+ * offered when no rack tile has a real legal move - a last-resort bridge,
+ * not a scoring play, so it never awards any points.
+ */
+export interface PendingWildRescue {
+  gapRow: number;
+  gapCol: number;
+  contentRow: number;
+  contentCol: number;
+  anchorRow: number;
+  anchorCol: number;
+}
+
+export interface WildRescueResult {
+  legal: boolean;
+  reason?: string;
+  status: GameStatus;
+}
+
 /** Cost in points to buy a wildcard tile via GameEngine.buyWildcard(). */
 export const WILD_TILE_COST = 15;
 
