@@ -11,7 +11,7 @@ interface Props {
 
 const ROLE_LABELS: Record<string, string> = {
   STARTER: "STARTER",
-  END_ANCHOR: "END ANCHOR",
+  END_ANCHOR: "ANCHOR",
 };
 
 export function TileInfoModal({ cell, dataset, onClose }: Props) {
