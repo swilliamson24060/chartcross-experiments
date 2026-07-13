@@ -304,8 +304,12 @@ console.log("\nWildcard tile checks:");
   const brunoMars = findArtist(dataset, "Bruno Mars");
   const uptownFunk = findSong(dataset, "Uptown Funk!", "Mark Ronson");
 
-  check("Wildcard connects to an artist", bestConnectionReason(wildcard, brunoMars) === "WILDCARD");
-  check("Wildcard connects to a song", bestConnectionReason(uptownFunk, wildcard) === "WILDCARD");
+  // A placed wildcard tile is inert for bestConnectionReason() - it must
+  // never act as a free anchor for a *new* placement, or a single bought
+  // charge could chain into unlimited free connections instead of being
+  // spent once per purchase.
+  check("A wildcard tile never matches an artist via bestConnectionReason", bestConnectionReason(wildcard, brunoMars) === null);
+  check("A wildcard tile never matches a song via bestConnectionReason", bestConnectionReason(uptownFunk, wildcard) === null);
   check("Wildcard connection is worth 0 points", connectionPoints("WILDCARD") === 0);
   check("Wildcard never triggers a multiplier", !tileMatchesMultiplierType(wildcard, "2X_SONG"));
   check(
@@ -355,7 +359,7 @@ console.log("\nWildcard tile checks:");
       const placeResult = engine.placeTile(i, moves[0].row, moves[0].col);
       if (!placeResult.legal || placeResult.resolved || !placeResult.pendingConnector) continue; // only care about a real pending guess
       placed = true;
-      const { gapRow, gapCol } = placeResult.pendingConnector;
+      const { gapRow, gapCol, anchorRow, anchorCol } = placeResult.pendingConnector;
 
       const scoreBefore = engine.getState().score;
       const wildResult = engine.useWildcardConnector();
@@ -376,6 +380,33 @@ console.log("\nWildcard tile checks:");
 
       const again = engine.useWildcardConnector();
       check("useWildcardConnector fails once out of charges", again.legal === false);
+
+      // The used-up wild connector must not become a free anchor for a
+      // *new* placement - the cell two steps beyond it (continuing the same
+      // direction) must never auto-resolve off the wildcard.
+      const dr = Math.sign(gapRow - anchorRow);
+      const dc = Math.sign(gapCol - anchorCol);
+      const beyondRow = gapRow + dr;
+      const beyondCol = gapCol + dc;
+      if (
+        beyondRow >= 0 && beyondRow < GRID_SIZE && beyondCol >= 0 && beyondCol < GRID_SIZE &&
+        !engine.getState().board[beyondRow][beyondCol].tile
+      ) {
+        const otherIdx = engine.getState().rack.findIndex((t) => t.kind !== "WILDCARD");
+        if (otherIdx !== -1) {
+          const chainAttempt = engine.placeTile(otherIdx, beyondRow, beyondCol);
+          check(
+            "Placing beyond a spent wild connector never auto-resolves through it for free",
+            !chainAttempt.legal || chainAttempt.resolved === false,
+          );
+          if (chainAttempt.legal && chainAttempt.pendingConnector) {
+            check(
+              "If it happened to be legal via a different anchor, that anchor isn't the wildcard cell",
+              !(chainAttempt.pendingConnector.anchorRow === gapRow && chainAttempt.pendingConnector.anchorCol === gapCol),
+            );
+          }
+        }
+      }
     }
     check("Found a real (non-wildcard) pending connector to spend the charge on", placed);
   } else {
@@ -487,7 +518,18 @@ console.log("\nWild rescue checks:");
       check(`Seed ${seed}: completeWildRescue succeeds with a valid rack index`, done.legal === true);
       check(`Seed ${seed}: pendingWildRescue clears once resolved`, engine.getState().pendingWildRescue === null);
       check(`Seed ${seed}: the content cell now holds the chosen rack tile`, !!engine.getState().board[pending.contentRow][pending.contentCol].tile);
-      check(`Seed ${seed}: a rescue placement never changes the score`, engine.getState().score === scoreBefore);
+      // The rescue itself always scores 0 - but completing it can leave the
+      // board/rack in a state with no more legal moves and no more wild
+      // charges, ending the game right there. That end-game penalty is a
+      // separate, expected score change, not a rescue payout.
+      if (engine.getState().status === "playing") {
+        check(`Seed ${seed}: a rescue placement scores nothing while the game continues`, engine.getState().score === scoreBefore);
+      } else {
+        check(
+          `Seed ${seed}: if completing the rescue ended the game, the score only reflects the end-game penalty`,
+          engine.getState().score === scoreBefore - engine.getState().penaltyApplied,
+        );
+      }
       check(`Seed ${seed}: rack refills back to size after the rescue`, engine.getState().rack.length === Math.min(5, rackBefore - 1 + 1));
 
       rescued = true;

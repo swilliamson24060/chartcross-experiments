@@ -109,7 +109,13 @@ export interface PendingConnector {
 export interface PlaceTileResult {
   legal: boolean;
   reason?: string;
-  /** True once the placement is fully scored - either it resolved immediately (wildcard) or a connector was never needed. False while a connector guess is pending. */
+  /**
+   * True once the placement is fully scored with nothing left to guess.
+   * placeTile() always requires a real connector guess now - a wildcard can
+   * never resolve a placement for free, only useWildcardConnector() or
+   * completeWildRescue() can - so this is false for every legal placeTile()
+   * result; it stays on the type for API stability.
+   */
   resolved: boolean;
   pendingConnector?: PendingConnector;
   edge?: ConnectionEdge;

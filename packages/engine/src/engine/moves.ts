@@ -47,15 +47,18 @@ function isSameDecade(a: MatchableTile, b: MatchableTile): boolean {
  * no rule matches. Only the strongest applicable tier is awarded per edge,
  * they are not summed.
  *
- * A wildcard tile connects to anything (and anything connects to it) worth
- * zero points - it's a rescue/bridging tool, not a scoring play. It also
- * stays wild permanently: once placed, any future neighbor of it is legal
- * too, since this same check runs for every pair the gap-placement rule
- * considers.
+ * A placed wildcard or connector tile is inert for this check - it never
+ * counts as a match for a *new* placement, even though it already links its
+ * own two original neighbors (see GameEngine.useWildcardConnector() /
+ * completeWildRescue(), which construct that link directly rather than
+ * through this function). Otherwise a single bought wild connector could
+ * keep chaining into unlimited free placements instead of being spent once
+ * per purchase.
  */
 export function bestConnectionReason(a: Tile, b: Tile): ConnectionReason | null {
-  if (a.kind === "WILDCARD" || b.kind === "WILDCARD") return "WILDCARD";
-  if (a.kind === "CONNECTOR" || b.kind === "CONNECTOR") return null;
+  if (a.kind === "WILDCARD" || b.kind === "WILDCARD" || a.kind === "CONNECTOR" || b.kind === "CONNECTOR") {
+    return null;
+  }
   if (isCollab(a, b)) return "COLLAB";
   if (isSameArtist(a, b)) return "ARTIST";
   if (isSameDecade(a, b)) return "DECADE";

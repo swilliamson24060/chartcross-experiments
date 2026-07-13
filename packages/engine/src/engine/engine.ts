@@ -61,7 +61,7 @@ export interface GameState {
 interface BestGapEdge {
   gap: GapPair["gap"];
   anchor: GapPair["anchor"];
-  reason: ConnectionReason;
+  reason: ConnectionCategory;
   points: number;
 }
 
@@ -251,12 +251,17 @@ export class GameEngine {
    * (row, col), the single highest-scoring one this tile could legally
    * connect through, or null if none match. Only one edge is ever used per
    * placement - unlike the old adjacency rule, connections aren't summed.
+   *
+   * A previously-placed wildcard or connector tile is never a valid anchor
+   * here (bestConnectionReason() already returns null for them) - a wild
+   * connector links only its own original two neighbors, once, and is
+   * otherwise inert for new placements.
    */
   private bestGapEdge(tile: Tile, row: number, col: number): BestGapEdge | null {
     let best: BestGapEdge | null = null;
     for (const { gap, anchor } of gapNeighbors(this.board, row, col)) {
       const reason = bestConnectionReason(tile, anchor.tile!);
-      if (!reason) continue;
+      if (!reason || reason === "WILDCARD") continue;
       const points = connectionPoints(reason);
       if (!best || points > best.points) {
         best = { gap, anchor, reason, points };
@@ -357,28 +362,6 @@ export class GameEngine {
     cell.tile = tile;
     this.usedIds.add(tile.id);
     this.rack.splice(tileIndex, 1);
-
-    if (best.reason === "WILDCARD") {
-      // The anchor is itself a wild connector from an earlier turn - it
-      // stays wild permanently, so this new tile bridges to it for free
-      // with nothing to guess. The fresh gap cell also becomes wild,
-      // letting the chain extend further on future turns.
-      best.gap.tile = this.createWildcardTile();
-      relocateMultiplier(this.board, this.rng, best.gap);
-      const { connectionScore, tileValue: value, finalScore } = this.scoreForEdge(tile, cell, 0);
-      this.refillRack();
-      this.score += finalScore;
-      this.updateStatus();
-      return {
-        legal: true,
-        resolved: true,
-        edge: { fromRow: row, fromCol: col, toRow: best.anchor.row, toCol: best.anchor.col, reason: "WILDCARD", points: 0 },
-        connectionScore,
-        tileValue: value,
-        finalScore,
-        status: this.status,
-      };
-    }
 
     // A real connection type is required - don't score or reveal the
     // answer yet. The gap cell and content tile stay on the board while
