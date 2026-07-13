@@ -98,6 +98,14 @@ export default function App() {
   function handleCellPress(row: number, col: number) {
     const cell = gameState.board[row][col];
     if (cell.tile) {
+      const isPendingContentTile =
+        pendingConnector?.contentRow === row && pendingConnector?.contentCol === col;
+      if (isPendingContentTile) {
+        // Its full details (chart year, performers) would give away the
+        // connector guess - block inspection until it's resolved.
+        showToast("Guess the connection first.", true);
+        return;
+      }
       setInfoCell(cell);
       return;
     }
