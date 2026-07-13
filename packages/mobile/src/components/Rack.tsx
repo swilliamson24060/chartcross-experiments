@@ -9,12 +9,11 @@ interface Props {
   selectedIndex: number | null;
   onSelect: (index: number) => void;
   onShuffle: () => void;
-  onHint: () => void;
 }
 
 const SLOT_SIZE = 56;
 
-export function Rack({ rack, selectedIndex, onSelect, onShuffle, onHint }: Props) {
+export function Rack({ rack, selectedIndex, onSelect, onShuffle }: Props) {
   return (
     <View>
       <View style={styles.toolbar}>
@@ -23,10 +22,6 @@ export function Rack({ rack, selectedIndex, onSelect, onShuffle, onHint }: Props
           <Pressable onPress={onShuffle} style={styles.iconButton}>
             <Text style={styles.iconText}>⇄</Text>
             <Text style={styles.iconCaption}>SHUFFLE</Text>
-          </Pressable>
-          <Pressable onPress={onHint} style={styles.iconButton}>
-            <Text style={styles.iconText}>💡</Text>
-            <Text style={styles.iconCaption}>HINT</Text>
           </Pressable>
         </View>
       </View>

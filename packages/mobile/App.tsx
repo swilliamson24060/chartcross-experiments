@@ -122,7 +122,11 @@ export default function App() {
     <View style={styles.app}>
       <StatusBar style="light" />
       <View style={styles.header}>
-        <View style={styles.headerSpacer} />
+        <View style={[styles.headerSpacer, styles.headerSpacerLeft]}>
+          <Pressable style={styles.headerIconButton} onPress={handleHint} hitSlop={8}>
+            <Text style={styles.headerIconText}>💡</Text>
+          </Pressable>
+        </View>
         <Text style={styles.title}>CHART CROSS</Text>
         <View style={styles.headerSpacer}>
           <Pressable
@@ -161,7 +165,6 @@ export default function App() {
           selectedIndex={selectedIndex}
           onSelect={handleSelectRackTile}
           onShuffle={handleShuffle}
-          onHint={handleHint}
         />
       </ScrollView>
 
@@ -199,6 +202,9 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 32,
     alignItems: "flex-end",
+  },
+  headerSpacerLeft: {
+    alignItems: "flex-start",
   },
   headerIconButton: {
     padding: 4,
