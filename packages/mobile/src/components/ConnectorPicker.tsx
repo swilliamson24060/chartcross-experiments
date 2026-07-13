@@ -8,6 +8,11 @@ interface Props {
   onGuess: (type: ConnectionCategory) => void;
   wildcardCount: number;
   onUseWildcard: () => void;
+  /** Whether the stuck-rescue flow is currently offered (see GameEngine.canWildRescue()). */
+  rescueAvailable: boolean;
+  /** True once the Wild chip has been tapped in rescue mode and we're waiting on a board tap. */
+  rescueTargeting: boolean;
+  onToggleRescue: () => void;
 }
 
 const LABELS: Record<ConnectionCategory, string> = {
@@ -28,14 +33,30 @@ const ACCENT: Record<ConnectionCategory, string> = {
  * slot. Only tappable while a gap placement is waiting on a guess. The wild
  * connector is a fourth slot alongside them, bought via buyWildcard() -
  * it's the only role a wildcard can play now, never a placeable rack tile.
+ * That same chip also doubles as the entry point for the stuck-rescue flow:
+ * tapping it while rescueAvailable (and not mid-guess) arms rescueTargeting
+ * so the next board tap places the wild connector there instead.
  */
-export function ConnectorPicker({ active, onGuess, wildcardCount, onUseWildcard }: Props) {
-  const wildcardEnabled = active && wildcardCount > 0;
+export function ConnectorPicker({
+  active,
+  onGuess,
+  wildcardCount,
+  onUseWildcard,
+  rescueAvailable,
+  rescueTargeting,
+  onToggleRescue,
+}: Props) {
+  const wildcardEnabled = (active || rescueAvailable) && wildcardCount > 0;
+  const label = active
+    ? "PICK A CONNECTION TYPE"
+    : rescueTargeting
+      ? "TAP A BOARD CELL FOR THE WILD CONNECTOR"
+      : rescueAvailable
+        ? "STUCK — USE A WILD RESCUE"
+        : "CONNECTORS";
   return (
     <View>
-      <Text style={[styles.label, active && styles.labelActive]}>
-        {active ? "PICK A CONNECTION TYPE" : "CONNECTORS"}
-      </Text>
+      <Text style={[styles.label, (active || rescueAvailable) && styles.labelActive]}>{label}</Text>
       <View style={styles.row}>
         {CONNECTION_CATEGORIES.map((type) => {
           const accent = ACCENT[type];
@@ -60,9 +81,10 @@ export function ConnectorPicker({ active, onGuess, wildcardCount, onUseWildcard 
         })}
         <Pressable
           disabled={!wildcardEnabled}
-          onPress={onUseWildcard}
+          onPress={active ? onUseWildcard : onToggleRescue}
           style={[
             styles.chip,
+            rescueTargeting && styles.chipSelected,
             {
               borderColor: colors.wildcard,
               backgroundColor: colors.wildcardDim,
@@ -102,6 +124,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     alignItems: "center",
     justifyContent: "center",
+  },
+  chipSelected: {
+    borderWidth: 3,
   },
   chipText: {
     fontSize: 10,

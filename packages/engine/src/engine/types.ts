@@ -109,7 +109,13 @@ export interface PendingConnector {
 export interface PlaceTileResult {
   legal: boolean;
   reason?: string;
-  /** True once the placement is fully scored - either it resolved immediately (wildcard) or a connector was never needed. False while a connector guess is pending. */
+  /**
+   * True once the placement is fully scored with nothing left to guess.
+   * placeTile() always requires a real connector guess now - a wildcard can
+   * never resolve a placement for free, only useWildcardConnector() or
+   * completeWildRescue() can - so this is false for every legal placeTile()
+   * result; it stays on the type for API stability.
+   */
   resolved: boolean;
   pendingConnector?: PendingConnector;
   edge?: ConnectionEdge;
@@ -136,6 +142,28 @@ export interface PlaceConnectorResult {
   connectionScore: number;
   tileValue: number;
   finalScore: number;
+  status: GameStatus;
+}
+
+/**
+ * A wild connector has been dropped into a gap cell via
+ * GameEngine.startWildRescue(), and the content cell on its far side is
+ * waiting for any rack tile via GameEngine.completeWildRescue(). Only
+ * offered when no rack tile has a real legal move - a last-resort bridge,
+ * not a scoring play, so it never awards any points.
+ */
+export interface PendingWildRescue {
+  gapRow: number;
+  gapCol: number;
+  contentRow: number;
+  contentCol: number;
+  anchorRow: number;
+  anchorCol: number;
+}
+
+export interface WildRescueResult {
+  legal: boolean;
+  reason?: string;
   status: GameStatus;
 }
 

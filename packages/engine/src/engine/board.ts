@@ -134,6 +134,55 @@ export function gapNeighbors(board: Board, row: number, col: number): GapPair[] 
   return result;
 }
 
+export interface WildGapPairing {
+  gap: Cell;
+  anchor: Cell;
+  content: Cell;
+}
+
+/**
+ * Treats (row, col) as a candidate gap cell for the stuck-rescue flow: is
+ * there a placed tile immediately on one side of it and empty space
+ * immediately on the other, so a wild connector dropped here could bridge
+ * them? Unlike gapNeighbors(), there's no category match involved - this is
+ * purely geometric, since the rescue accepts any tile in the content cell.
+ * Returns the first valid direction found, or null if (row, col) isn't
+ * empty or has no such pairing.
+ */
+export function wildGapPairing(board: Board, row: number, col: number): WildGapPairing | null {
+  if (board[row][col].tile) return null;
+  const deltas = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+  ];
+  for (const [dr, dc] of deltas) {
+    const anchorRow = row + dr;
+    const anchorCol = col + dc;
+    const contentRow = row - dr;
+    const contentCol = col - dc;
+    if (anchorRow < 0 || anchorRow >= GRID_SIZE || anchorCol < 0 || anchorCol >= GRID_SIZE) continue;
+    if (contentRow < 0 || contentRow >= GRID_SIZE || contentCol < 0 || contentCol >= GRID_SIZE) continue;
+    const anchor = board[anchorRow][anchorCol];
+    const content = board[contentRow][contentCol];
+    if (anchor.tile && !content.tile) {
+      return { gap: board[row][col], anchor, content };
+    }
+  }
+  return null;
+}
+
+/** Whether any empty cell on the board could currently serve as a rescue gap. */
+export function hasWildRescueOption(board: Board): boolean {
+  for (const row of board) {
+    for (const cell of row) {
+      if (!cell.tile && wildGapPairing(board, cell.row, cell.col)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Multipliers only ever pay out for a content tile landing on them - a
  * connector (or wild connector) filling that same cell can never benefit,

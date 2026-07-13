@@ -155,7 +155,12 @@ export function HowToPlayModal({ visible, onClose }: Props) {
                 •  STARTER and END ANCHOR become linked by a path of touching tiles — even tiles
                 that don't score anything together.
               </Text>
-              <Text style={styles.bullet}>•  None of your rack tiles have any legal placement left.</Text>
+              <Text style={styles.bullet}>
+                •  None of your rack tiles have any legal placement left — unless you're holding a
+                ★ Wild connector, in which case you get a rescue: tap the ★ WILD chip, tap an empty
+                board cell next to any placed tile with empty space beyond it, then place any rack
+                tile there for free. It keeps the game going but scores no points at all.
+              </Text>
             </Section>
 
             <Section title="TOOLS">

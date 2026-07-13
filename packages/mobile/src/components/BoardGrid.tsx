@@ -9,7 +9,8 @@ interface Props {
   board: Board;
   cellSize: number;
   highlightCells: Set<string>;
-  pendingGapCell?: { row: number; col: number } | null;
+  /** The cell currently awaiting player action - a connector guess or a rescue tile. */
+  pendingActionCell?: { row: number; col: number } | null;
   onCellPress: (row: number, col: number) => void;
 }
 
@@ -39,7 +40,7 @@ const MULTIPLIER_TIER: Record<MultiplierType, 2 | 3 | 1> = {
   CHART_BOOST: 1,
 };
 
-export function BoardGrid({ board, cellSize, highlightCells, pendingGapCell, onCellPress }: Props) {
+export function BoardGrid({ board, cellSize, highlightCells, pendingActionCell, onCellPress }: Props) {
   const size = cellSize * GRID_SIZE;
   return (
     <View style={[styles.board, { width: size, height: size }]}>
@@ -48,7 +49,7 @@ export function BoardGrid({ board, cellSize, highlightCells, pendingGapCell, onC
           {row.map((cell) => {
             const isHighlighted = highlightCells.has(`${cell.row},${cell.col}`);
             const isPendingGap =
-              pendingGapCell?.row === cell.row && pendingGapCell?.col === cell.col;
+              pendingActionCell?.row === cell.row && pendingActionCell?.col === cell.col;
             const tier = cell.multiplier ? MULTIPLIER_TIER[cell.multiplier] : undefined;
             const multiplierColor = cell.multiplier ? MULTIPLIER_COLORS[cell.multiplier] : undefined;
             return (

@@ -44,6 +44,7 @@ export default function App() {
   const engineRef = useRef<GameEngine>(newEngine(levelNumber));
   const [gameState, setGameState] = useState(() => engineRef.current.getState());
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [rescueTargeting, setRescueTargeting] = useState(false);
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
   const [infoCell, setInfoCell] = useState<Cell | null>(null);
   const [showConnections, setShowConnections] = useState(false);
@@ -54,16 +55,37 @@ export default function App() {
 
   const connections = useMemo(() => getAllConnections(gameState.board), [gameState]);
   const pendingConnector = gameState.pendingConnector;
+  const pendingWildRescue = gameState.pendingWildRescue;
+
+  // Only offered once no rack tile has a real legal move - a last-resort
+  // bridge (see GameEngine.canWildRescue()), not a shortcut around guessing.
+  const stuckRescueAvailable =
+    gameState.status === "playing" &&
+    !pendingConnector &&
+    !pendingWildRescue &&
+    gameState.wildcardConnectors > 0 &&
+    !engineRef.current.hasAnyLegalMove();
 
   const legalMoves = useMemo(() => {
-    if (selectedIndex === null || pendingConnector) return [];
+    if (selectedIndex === null || pendingConnector || pendingWildRescue) return [];
     return engineRef.current.legalMovesForRackTile(selectedIndex);
-  }, [selectedIndex, pendingConnector, gameState]);
+  }, [selectedIndex, pendingConnector, pendingWildRescue, gameState]);
 
-  const highlightCells = useMemo(
-    () => new Set(legalMoves.map((m) => `${m.row},${m.col}`)),
-    [legalMoves],
-  );
+  const rescueGapCells = useMemo(() => {
+    if (!rescueTargeting) return [];
+    return engineRef.current.legalWildRescueGapCells();
+  }, [rescueTargeting, gameState]);
+
+  const highlightCells = useMemo(() => {
+    const source = rescueTargeting ? rescueGapCells : legalMoves;
+    return new Set(source.map((m) => `${m.row},${m.col}`));
+  }, [rescueTargeting, rescueGapCells, legalMoves]);
+
+  const pendingActionCell = pendingConnector
+    ? { row: pendingConnector.gapRow, col: pendingConnector.gapCol }
+    : pendingWildRescue
+      ? { row: pendingWildRescue.contentRow, col: pendingWildRescue.contentCol }
+      : null;
 
   function refresh() {
     setGameState(engineRef.current.getState());
@@ -91,7 +113,18 @@ export default function App() {
   }
 
   function handleSelectRackTile(index: number) {
-    if (gameState.status !== "playing" || pendingConnector) return;
+    if (gameState.status !== "playing") return;
+    if (pendingWildRescue) {
+      const result = engineRef.current.completeWildRescue(index);
+      refresh();
+      if (!result.legal) {
+        showToast(result.reason ?? "Can't finish the rescue right now.", true);
+        return;
+      }
+      showToast("Placed for free to keep the game going — no points.");
+      return;
+    }
+    if (pendingConnector || rescueTargeting) return;
     setSelectedIndex((current) => (current === index ? null : index));
   }
 
@@ -109,7 +142,18 @@ export default function App() {
       setInfoCell(cell);
       return;
     }
-    if (pendingConnector || selectedIndex === null) return;
+    if (rescueTargeting) {
+      const result = engineRef.current.startWildRescue(row, col);
+      if (!result.legal) {
+        showToast(result.reason ?? "Can't start a rescue there.", true);
+        return;
+      }
+      setRescueTargeting(false);
+      refresh();
+      showToast("Wild connector placed — now pick any tile to finish.");
+      return;
+    }
+    if (pendingConnector || pendingWildRescue || selectedIndex === null) return;
     const result = engineRef.current.placeTile(selectedIndex, row, col);
     if (!result.legal) {
       showToast(result.reason ?? "Illegal move.", true);
@@ -145,13 +189,20 @@ export default function App() {
   }
 
   function handleShuffle() {
-    if (gameState.status !== "playing" || pendingConnector) return;
+    if (gameState.status !== "playing" || pendingConnector || pendingWildRescue || rescueTargeting) return;
     engineRef.current.shuffleRack();
     refresh();
   }
 
   function handleHint() {
-    if (gameState.status !== "playing" || selectedIndex !== null || pendingConnector) return;
+    if (
+      gameState.status !== "playing" ||
+      selectedIndex !== null ||
+      pendingConnector ||
+      pendingWildRescue ||
+      rescueTargeting
+    )
+      return;
     const state = engineRef.current.getState();
     for (let i = 0; i < state.rack.length; i++) {
       if (engineRef.current.legalMovesForRackTile(i).length > 0) {
@@ -187,11 +238,18 @@ export default function App() {
     showScoreToast(result);
   }
 
+  function handleToggleRescue() {
+    if (!stuckRescueAvailable) return;
+    setSelectedIndex(null);
+    setRescueTargeting((current) => !current);
+  }
+
   function handleRestart() {
     const next = levelNumber + 1;
     setLevelNumber(next);
     engineRef.current = newEngine(next);
     setSelectedIndex(null);
+    setRescueTargeting(false);
     setToast(null);
     refresh();
   }
@@ -246,9 +304,7 @@ export default function App() {
             board={gameState.board}
             cellSize={cellSize}
             highlightCells={highlightCells}
-            pendingGapCell={
-              pendingConnector ? { row: pendingConnector.gapRow, col: pendingConnector.gapCol } : null
-            }
+            pendingActionCell={pendingActionCell}
             onCellPress={handleCellPress}
           />
         </View>
@@ -265,6 +321,9 @@ export default function App() {
             onGuess={handleConnectorGuess}
             wildcardCount={gameState.wildcardConnectors}
             onUseWildcard={handleUseWildcard}
+            rescueAvailable={stuckRescueAvailable}
+            rescueTargeting={rescueTargeting}
+            onToggleRescue={handleToggleRescue}
           />
         </View>
 

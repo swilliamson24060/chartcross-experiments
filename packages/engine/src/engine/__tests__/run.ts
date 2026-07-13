@@ -1,5 +1,12 @@
 import { loadLocalDataset } from "../loadLocalDataset";
-import { createEmptyBoard, placeStarterAndAnchor, relocateMultiplier, tileMatchesMultiplierType } from "../board";
+import {
+  createEmptyBoard,
+  hasWildRescueOption,
+  placeStarterAndAnchor,
+  relocateMultiplier,
+  tileMatchesMultiplierType,
+  wildGapPairing,
+} from "../board";
 import { GRID_SIZE } from "../types";
 import { bestConnectionReason, connectionPoints } from "../moves";
 import { isStarterPathConnectedToAnchor } from "../graph";
@@ -297,8 +304,12 @@ console.log("\nWildcard tile checks:");
   const brunoMars = findArtist(dataset, "Bruno Mars");
   const uptownFunk = findSong(dataset, "Uptown Funk!", "Mark Ronson");
 
-  check("Wildcard connects to an artist", bestConnectionReason(wildcard, brunoMars) === "WILDCARD");
-  check("Wildcard connects to a song", bestConnectionReason(uptownFunk, wildcard) === "WILDCARD");
+  // A placed wildcard tile is inert for bestConnectionReason() - it must
+  // never act as a free anchor for a *new* placement, or a single bought
+  // charge could chain into unlimited free connections instead of being
+  // spent once per purchase.
+  check("A wildcard tile never matches an artist via bestConnectionReason", bestConnectionReason(wildcard, brunoMars) === null);
+  check("A wildcard tile never matches a song via bestConnectionReason", bestConnectionReason(uptownFunk, wildcard) === null);
   check("Wildcard connection is worth 0 points", connectionPoints("WILDCARD") === 0);
   check("Wildcard never triggers a multiplier", !tileMatchesMultiplierType(wildcard, "2X_SONG"));
   check(
@@ -348,7 +359,7 @@ console.log("\nWildcard tile checks:");
       const placeResult = engine.placeTile(i, moves[0].row, moves[0].col);
       if (!placeResult.legal || placeResult.resolved || !placeResult.pendingConnector) continue; // only care about a real pending guess
       placed = true;
-      const { gapRow, gapCol } = placeResult.pendingConnector;
+      const { gapRow, gapCol, anchorRow, anchorCol } = placeResult.pendingConnector;
 
       const scoreBefore = engine.getState().score;
       const wildResult = engine.useWildcardConnector();
@@ -369,11 +380,162 @@ console.log("\nWildcard tile checks:");
 
       const again = engine.useWildcardConnector();
       check("useWildcardConnector fails once out of charges", again.legal === false);
+
+      // The used-up wild connector must not become a free anchor for a
+      // *new* placement - the cell two steps beyond it (continuing the same
+      // direction) must never auto-resolve off the wildcard.
+      const dr = Math.sign(gapRow - anchorRow);
+      const dc = Math.sign(gapCol - anchorCol);
+      const beyondRow = gapRow + dr;
+      const beyondCol = gapCol + dc;
+      if (
+        beyondRow >= 0 && beyondRow < GRID_SIZE && beyondCol >= 0 && beyondCol < GRID_SIZE &&
+        !engine.getState().board[beyondRow][beyondCol].tile
+      ) {
+        const otherIdx = engine.getState().rack.findIndex((t) => t.kind !== "WILDCARD");
+        if (otherIdx !== -1) {
+          const chainAttempt = engine.placeTile(otherIdx, beyondRow, beyondCol);
+          check(
+            "Placing beyond a spent wild connector never auto-resolves through it for free",
+            !chainAttempt.legal || chainAttempt.resolved === false,
+          );
+          if (chainAttempt.legal && chainAttempt.pendingConnector) {
+            check(
+              "If it happened to be legal via a different anchor, that anchor isn't the wildcard cell",
+              !(chainAttempt.pendingConnector.anchorRow === gapRow && chainAttempt.pendingConnector.anchorCol === gapCol),
+            );
+          }
+        }
+      }
     }
     check("Found a real (non-wildcard) pending connector to spend the charge on", placed);
   } else {
     check("Reached enough score to buy a wild connector within 200 moves", false);
   }
+}
+
+console.log("\nWild rescue checks:");
+{
+  // Direct geometry checks against a hand-built board, independent of the
+  // engine. STARTER alone already has empty neighbors with empty space
+  // beyond them, so a rescue gap exists from the very first cell.
+  const board = createEmptyBoard();
+  const starter = findArtist(dataset, "Lady Gaga");
+  const anchor = findArtist(dataset, "Amy Winehouse");
+  placeStarterAndAnchor(board, starter, anchor);
+
+  const pairing = wildGapPairing(board, GRID_SIZE - 1, 1); // one cell right of STARTER
+  check("wildGapPairing finds a gap next to STARTER with empty space beyond it", pairing !== null);
+  check("The pairing's anchor is STARTER", pairing?.anchor.tile?.id === starter.id);
+  check(
+    "The pairing's content cell is the empty cell on the far side of the gap",
+    pairing?.content.row === GRID_SIZE - 1 && pairing?.content.col === 2,
+  );
+  check("hasWildRescueOption is true as soon as any tile has room beside it", hasWildRescueOption(board));
+  check("An already-occupied cell (STARTER's own) can't be a gap", wildGapPairing(board, GRID_SIZE - 1, 0) === null);
+  check("A cell with no adjacent placed tile at all can't be a gap", wildGapPairing(board, 3, 3) === null);
+
+  // Occupy the content cell from that specific pairing - the same gap tap
+  // should now fail in that direction (though STARTER still has other
+  // valid directions, which is fine; this only checks the one spot).
+  const filler = findSong(dataset, "Die With A Smile", "Lady Gaga");
+  board[GRID_SIZE - 1][2].tile = filler;
+  check(
+    "That exact gap/direction fails once its content cell is occupied",
+    wildGapPairing(board, GRID_SIZE - 1, 1) === null,
+  );
+
+  // Engine-level: force a stuck-but-rescuable state by buying a wild
+  // connector, then greedily playing real moves until none remain. Try
+  // several seeds since not every game runs out of real moves within a
+  // bounded number of turns.
+  let rescued = false;
+  for (let seed = 0; seed < 30 && !rescued; seed++) {
+    const engine = new GameEngine(dataset, 49, seed);
+    let guard = 0;
+
+    // Buy a wild connector as soon as affordable, once, then keep playing.
+    let bought = false;
+    while (engine.getState().status === "playing" && guard++ < 300) {
+      if (!bought && engine.getState().score >= WILD_TILE_COST) {
+        engine.buyWildcard();
+        bought = true;
+      }
+      if (!engine.hasAnyLegalMove()) break; // either stuck-with-rescue or truly stuck
+      const rack = engine.getState().rack;
+      let played = false;
+      for (let i = 0; i < rack.length; i++) {
+        const moves = engine.legalMovesForRackTile(i);
+        if (moves.length > 0) {
+          resolveMove(engine, i, moves[0]);
+          played = true;
+          break;
+        }
+      }
+      if (!played) break;
+    }
+
+    if (
+      bought &&
+      engine.getState().status === "playing" &&
+      !engine.hasAnyLegalMove() &&
+      engine.getState().wildcardConnectors > 0
+    ) {
+      check(
+        `Seed ${seed}: status stays "playing" when stuck but a wild rescue is available`,
+        engine.getState().status === "playing",
+      );
+      const gapCells = engine.legalWildRescueGapCells();
+      check(`Seed ${seed}: at least one rescue gap cell is available`, gapCells.length > 0);
+      if (gapCells.length === 0) continue;
+
+      const rackBefore = engine.getState().rack.length;
+      const wildBefore = engine.getState().wildcardConnectors;
+      const scoreBefore = engine.getState().score;
+      const gap = gapCells[0];
+
+      const wrongOrder = engine.completeWildRescue(0);
+      check(`Seed ${seed}: completeWildRescue fails with no pending rescue`, wrongOrder.legal === false);
+
+      const withMoves = engine.hasAnyLegalMove();
+      check(`Seed ${seed}: confirmed no legal move exists before starting the rescue`, !withMoves);
+
+      const started = engine.startWildRescue(gap.row, gap.col);
+      check(`Seed ${seed}: startWildRescue succeeds on a valid gap cell`, started.legal === true);
+      check(`Seed ${seed}: wildcardConnectors decrements by one`, engine.getState().wildcardConnectors === wildBefore - 1);
+      check(`Seed ${seed}: the gap cell is now filled with a WILDCARD-kind tile`, engine.getState().board[gap.row][gap.col].tile?.kind === "WILDCARD");
+      check(`Seed ${seed}: pendingWildRescue is now set`, engine.getState().pendingWildRescue !== null);
+      check(`Seed ${seed}: rack is untouched until the rescue completes`, engine.getState().rack.length === rackBefore);
+
+      const again = engine.startWildRescue(gap.row, gap.col);
+      check(`Seed ${seed}: a second startWildRescue is rejected while one is already pending`, again.legal === false);
+
+      const blockedPlace = engine.placeTile(0, 0, 0);
+      check(`Seed ${seed}: placeTile is rejected while a rescue is pending`, blockedPlace.legal === false);
+
+      const pending = engine.getState().pendingWildRescue!;
+      const done = engine.completeWildRescue(0);
+      check(`Seed ${seed}: completeWildRescue succeeds with a valid rack index`, done.legal === true);
+      check(`Seed ${seed}: pendingWildRescue clears once resolved`, engine.getState().pendingWildRescue === null);
+      check(`Seed ${seed}: the content cell now holds the chosen rack tile`, !!engine.getState().board[pending.contentRow][pending.contentCol].tile);
+      // The rescue itself always scores 0 - but completing it can leave the
+      // board/rack in a state with no more legal moves and no more wild
+      // charges, ending the game right there. That end-game penalty is a
+      // separate, expected score change, not a rescue payout.
+      if (engine.getState().status === "playing") {
+        check(`Seed ${seed}: a rescue placement scores nothing while the game continues`, engine.getState().score === scoreBefore);
+      } else {
+        check(
+          `Seed ${seed}: if completing the rescue ended the game, the score only reflects the end-game penalty`,
+          engine.getState().score === scoreBefore - engine.getState().penaltyApplied,
+        );
+      }
+      check(`Seed ${seed}: rack refills back to size after the rescue`, engine.getState().rack.length === Math.min(5, rackBefore - 1 + 1));
+
+      rescued = true;
+    }
+  }
+  check("Found a seed where a wild rescue could be exercised end-to-end within 30 tries", rescued);
 }
 
 console.log("\nMultiplier relocation checks:");
