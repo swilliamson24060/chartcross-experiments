@@ -1,7 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { tileValue, type Tile } from "@chartcross/engine";
-import { colors } from "../theme";
+import { tileLabel, tileValue, type Tile } from "@chartcross/engine";
+import { colors, connectorDim } from "../theme";
 
 interface Props {
   tile: Tile;
@@ -13,16 +13,31 @@ interface Props {
   onPress?: () => void;
 }
 
+const CONNECTOR_ACCENT: Record<"COLLAB" | "ARTIST" | "DECADE", string> = {
+  COLLAB: colors.collab,
+  ARTIST: colors.connectorArtist,
+  DECADE: colors.decade,
+};
+
 export function TileChip({ tile, size, role, selected, dimmed, showValue, onPress }: Props) {
   const isArtist = tile.kind === "ARTIST";
   const isWildcard = tile.kind === "WILDCARD";
-  const accent = isWildcard ? colors.wildcard : isArtist ? colors.artist : colors.song;
-  const backgroundColor = isWildcard
-    ? colors.wildcardDim
-    : isArtist
-      ? colors.artistDim
-      : colors.songDim;
-  const label = tile.kind === "ARTIST" ? tile.name : tile.kind === "SONG" ? tile.title : "★ WILD";
+  const isConnector = tile.kind === "CONNECTOR";
+  const accent = isConnector
+    ? CONNECTOR_ACCENT[tile.connectionType]
+    : isWildcard
+      ? colors.wildcard
+      : isArtist
+        ? colors.artist
+        : colors.song;
+  const backgroundColor = isConnector
+    ? connectorDim[tile.connectionType]
+    : isWildcard
+      ? colors.wildcardDim
+      : isArtist
+        ? colors.artistDim
+        : colors.songDim;
+  const label = tile.kind === "WILDCARD" ? "★ WILD" : tileLabel(tile);
   const value = tileValue(tile);
 
   const content = (
@@ -36,7 +51,7 @@ export function TileChip({ tile, size, role, selected, dimmed, showValue, onPres
           backgroundColor,
           borderWidth: selected ? 3 : role ? 2.5 : 1.5,
           opacity: dimmed ? 0.55 : 1,
-          boxShadow: selected || role || isWildcard ? `0 0 6px ${accent}` : undefined,
+          boxShadow: selected || role || isWildcard || isConnector ? `0 0 6px ${accent}` : undefined,
         },
       ]}
     >

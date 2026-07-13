@@ -9,7 +9,13 @@ import {
   Text,
   View,
 } from "react-native";
-import { CHART_BOOST_FLAT_BONUS, decadePoints, REASON_POINTS, WILD_TILE_COST } from "@chartcross/engine";
+import {
+  CHART_BOOST_FLAT_BONUS,
+  decadePoints,
+  REASON_POINTS,
+  WILD_TILE_COST,
+  WRONG_CONNECTOR_PENALTY,
+} from "@chartcross/engine";
 import { colors } from "../theme";
 
 interface Props {
@@ -99,28 +105,38 @@ export function HowToPlayModal({ visible, onClose }: Props) {
 
             <Section title="PLACING TILES">
               <Text style={styles.body}>
-                Tap a rack tile, then tap a highlighted cell next to it on the board. A placement
-                is legal only if the new tile shares a Year, Peak Chart Position, or a
-                Collaborating Artist with a tile already touching that cell — or if it's a ★
-                Wildcard, which connects to anything.
+                Tap a rack tile, then tap a highlighted cell two squares away from a tile already
+                on the board, in a straight line, with an empty gap between them — or if it's a ★
+                Wildcard, which bridges the gap to anything for free.
+              </Text>
+            </Section>
+
+            <Section title="GUESS THE CONNECTION">
+              <Text style={styles.body}>
+                Placing a real tile doesn't score yet — you still have to fill the gap. Pick one
+                of the three always-available connector tiles below the board and guess how the
+                two tiles relate:
+              </Text>
+              <ScoreRow label="Collab Connect" value={`+${REASON_POINTS.COLLAB}`} color={colors.collab} />
+              <ScoreRow label="Artist Connect" value={`+${REASON_POINTS.ARTIST}`} color={colors.connectorArtist} />
+              <ScoreRow label="Decade Connect" value={`+${REASON_POINTS.DECADE}`} color={colors.decade} />
+              <Text style={styles.body}>
+                Guess wrong and you lose {WRONG_CONNECTOR_PENALTY} points, but the gap stays open
+                — just try a different connector. The connector tiles themselves never run out.
               </Text>
             </Section>
 
             <Section title="SCORING">
-              <ScoreRow label="Same Year" value={`+${REASON_POINTS.YEAR}`} color={colors.year} />
-              <ScoreRow label="Same Peak Position" value={`+${REASON_POINTS.PEAK}`} color={colors.peak} />
-              <ScoreRow label="Collaborating Artists" value={`+${REASON_POINTS.COLLAB}`} color={colors.collab} />
-              <ScoreRow label="Wildcard connection" value={`+${REASON_POINTS.WILDCARD}`} color={colors.wildcard} />
               <Text style={styles.body}>
                 Every tile also carries its own Point Value (the badge on rack tiles), based on
                 the decade it charted in — 2020s is worth {decadePoints(2023)}, all the way back
                 to the 1950s at {decadePoints(1958)}. Older is worth more. This value is added on
-                top of the connection score whenever you place it.
+                top of the connection score once you guess correctly.
               </Text>
               <Text style={styles.body}>
                 Landing on a 2X or 3X SONG/ARTIST cell multiplies your connection score if the
                 tile type matches. CHART BOOST adds a flat +{CHART_BOOST_FLAT_BONUS}. Multipliers
-                never apply to Wildcards.
+                never apply to Wildcards or connector tiles.
               </Text>
             </Section>
 

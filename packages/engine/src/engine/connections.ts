@@ -1,4 +1,5 @@
-import { bestConnectionReason, connectionPoints } from "./moves";
+import { connectionPoints } from "./moves";
+import { adjacentCells } from "./board";
 import { Board, ConnectionReason, GRID_SIZE, Tile } from "./types";
 
 export interface BoardConnection {
@@ -13,10 +14,15 @@ export interface BoardConnection {
 }
 
 /**
- * Every legally-matching adjacent pair of placed tiles currently on the
- * board (each pair counted once). This is the same adjacency-matching
- * logic used to draw the board's connector lines, factored out so it can
- * also back a textual connections list.
+ * One entry per placed connector tile on the board, describing the two
+ * content tiles it links. The connection type was already validated at
+ * placement time (GameEngine.placeConnector()), so this just reads it back
+ * off the connector rather than recomputing a match - it backs both the
+ * board's connector-line rendering and the textual connections list.
+ *
+ * A wildcard's free bridge doesn't go through a connector tile (see
+ * GameEngine's wildcard fast path) and isn't a scoring connection, so it's
+ * not represented here.
  */
 export function getAllConnections(board: Board): BoardConnection[] {
   const connections: BoardConnection[] = [];
@@ -24,26 +30,24 @@ export function getAllConnections(board: Board): BoardConnection[] {
   for (let row = 0; row < GRID_SIZE; row++) {
     for (let col = 0; col < GRID_SIZE; col++) {
       const cell = board[row][col];
-      if (!cell.tile) continue;
+      if (!cell.tile || cell.tile.kind !== "CONNECTOR") continue;
 
-      const right = col + 1 < GRID_SIZE ? board[row][col + 1] : undefined;
-      const down = row + 1 < GRID_SIZE ? board[row + 1][col] : undefined;
-
-      for (const neighbor of [right, down]) {
-        if (!neighbor?.tile) continue;
-        const reason = bestConnectionReason(cell.tile, neighbor.tile);
-        if (!reason) continue;
-        connections.push({
-          fromRow: row,
-          fromCol: col,
-          toRow: neighbor.row,
-          toCol: neighbor.col,
-          tileA: cell.tile,
-          tileB: neighbor.tile,
-          reason,
-          points: connectionPoints(reason),
-        });
-      }
+      const contentNeighbors = adjacentCells(board, row, col).filter(
+        (n) => n.tile && n.tile.kind !== "CONNECTOR",
+      );
+      if (contentNeighbors.length < 2) continue;
+      const [a, b] = contentNeighbors;
+      const reason = cell.tile.connectionType;
+      connections.push({
+        fromRow: a.row,
+        fromCol: a.col,
+        toRow: b.row,
+        toCol: b.col,
+        tileA: a.tile!,
+        tileB: b.tile!,
+        reason,
+        points: connectionPoints(reason),
+      });
     }
   }
 

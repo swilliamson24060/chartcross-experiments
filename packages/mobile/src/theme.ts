@@ -17,17 +17,24 @@ export const colors = {
   multiplierSong: "#2ec5ff",
   multiplierArtist: "#ff3d9a",
   chartBoost: "#ff9a3d",
-  year: "#4fd67a",
-  peak: "#ffd43d",
+  decade: "#4fd67a",
   collab: "#ff3d9a",
+  connectorArtist: "#ffa63d",
   illegal: "#ff4d4d",
+  pendingGap: "#ffe066",
   rackSlotBg: "#111b36",
   rackSlotBorder: "#2a3660",
 };
 
-export const connectionColors: Record<"YEAR" | "PEAK" | "COLLAB" | "WILDCARD", string> = {
-  YEAR: colors.year,
-  PEAK: colors.peak,
+export const connectionColors: Record<"DECADE" | "ARTIST" | "COLLAB" | "WILDCARD", string> = {
+  DECADE: colors.decade,
+  ARTIST: colors.connectorArtist,
   COLLAB: colors.collab,
   WILDCARD: colors.wildcard,
+};
+
+export const connectorDim: Record<"DECADE" | "ARTIST" | "COLLAB", string> = {
+  DECADE: "#1e4230",
+  ARTIST: "#4a3016",
+  COLLAB: colors.artistDim,
 };

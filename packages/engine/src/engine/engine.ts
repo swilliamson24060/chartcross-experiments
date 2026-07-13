@@ -1,7 +1,8 @@
 import {
-  adjacentCells,
   CHART_BOOST_FLAT_BONUS,
   createEmptyBoard,
+  GapPair,
+  gapNeighbors,
   multiplierFactor,
   pickTwoDistinctArtists,
   placeStarterAndAnchor,
@@ -15,16 +16,22 @@ import { createRng, pickRandom, randomInt } from "./rng";
 import { tileValue } from "./tileValue";
 import {
   Board,
+  ConnectionCategory,
   ConnectionEdge,
+  ConnectionReason,
+  ConnectorTile,
   Dataset,
   GameStatus,
   GRID_SIZE,
-  MoveResult,
   MultiplierType,
+  PendingConnector,
+  PlaceConnectorResult,
+  PlaceTileResult,
   PurchaseResult,
   Tile,
   WILD_TILE_COST,
   WildcardTile,
+  WRONG_CONNECTOR_PENALTY,
 } from "./types";
 
 const RACK_SIZE = 5;
@@ -39,6 +46,15 @@ export interface GameState {
   levelNumber: number;
   /** Points deducted from the score when the game ended; 0 while playing. */
   penaltyApplied: number;
+  /** Set while a placed tile is waiting on a connector guess via placeConnector(). */
+  pendingConnector: PendingConnector | null;
+}
+
+interface BestGapEdge {
+  gap: GapPair["gap"];
+  anchor: GapPair["anchor"];
+  reason: ConnectionReason;
+  points: number;
 }
 
 export class GameEngine {
@@ -53,6 +69,10 @@ export class GameEngine {
   private penaltyApplied = 0;
   private levelNumber: number;
   private wildcardCounter = 0;
+  private connectorCounter = 0;
+  private pendingConnector: PendingConnector | null = null;
+  /** The hidden correct answer for the active pendingConnector; never exposed via getState(). */
+  private pendingRequiredReason: ConnectionCategory | null = null;
 
   constructor(dataset: Dataset, levelNumber: number, seed?: number) {
     this.dataset = dataset;
@@ -160,6 +180,10 @@ export class GameEngine {
     return { kind: "WILDCARD", id: `wild-${this.wildcardCounter++}` };
   }
 
+  private createConnectorTile(connectionType: ConnectionCategory): ConnectorTile {
+    return { kind: "CONNECTOR", id: `connector-${this.connectorCounter++}`, connectionType };
+  }
+
   private drawTile(): Tile | null {
     if (this.rng() < WILDCARD_DRAW_CHANCE) return this.createWildcardTile();
 
@@ -188,91 +212,97 @@ export class GameEngine {
       status: this.status,
       levelNumber: this.levelNumber,
       penaltyApplied: this.penaltyApplied,
+      pendingConnector: this.pendingConnector,
     };
   }
 
-  /** All legal (row, col) targets for a given rack tile, with the score it would earn. */
+  /**
+   * Only top up to RACK_SIZE - a bought wildcard (see buyWildcard()) can
+   * push the rack above RACK_SIZE, and it should settle back down rather
+   * than being refilled again on the next placement.
+   */
+  private refillRack(): void {
+    if (this.rack.length < RACK_SIZE) {
+      const refill = this.drawTile();
+      if (refill) this.rack.push(refill);
+    }
+  }
+
+  /**
+   * Among the empty-gap/occupied-anchor pairs gapNeighbors() finds around
+   * (row, col), the single highest-scoring one this tile could legally
+   * connect through, or null if none match. Only one edge is ever used per
+   * placement - unlike the old adjacency rule, connections aren't summed.
+   */
+  private bestGapEdge(tile: Tile, row: number, col: number): BestGapEdge | null {
+    let best: BestGapEdge | null = null;
+    for (const { gap, anchor } of gapNeighbors(this.board, row, col)) {
+      const reason = bestConnectionReason(tile, anchor.tile!);
+      if (!reason) continue;
+      const points = connectionPoints(reason);
+      if (!best || points > best.points) {
+        best = { gap, anchor, reason, points };
+      }
+    }
+    return best;
+  }
+
+  /** The score a correct connector guess would earn for this tile/edge, factoring in the landing cell's multiplier. */
+  private scoreForEdge(
+    tile: Tile,
+    landingCell: { multiplier?: MultiplierType },
+    points: number,
+  ): { connectionScore: number; tileValue: number; finalScore: number; multiplierApplied?: MultiplierType; multiplierMissed?: MultiplierType } {
+    let connectionScore = points;
+    let multiplierApplied: MultiplierType | undefined;
+    let multiplierMissed: MultiplierType | undefined;
+    if (landingCell.multiplier) {
+      if (points > 0 && tileMatchesMultiplierType(tile, landingCell.multiplier)) {
+        connectionScore =
+          landingCell.multiplier === "CHART_BOOST"
+            ? points + CHART_BOOST_FLAT_BONUS
+            : points * multiplierFactor(landingCell.multiplier);
+        multiplierApplied = landingCell.multiplier;
+      } else {
+        multiplierMissed = landingCell.multiplier;
+      }
+    }
+    const value = tileValue(tile);
+    return { connectionScore, tileValue: value, finalScore: connectionScore + value, multiplierApplied, multiplierMissed };
+  }
+
+  /** All legal (row, col) targets for a given rack tile, with the score a correct connector guess would earn. */
   legalMovesForRackTile(tileIndex: number): Array<{ row: number; col: number; edges: ConnectionEdge[]; finalScore: number }> {
     const tile = this.rack[tileIndex];
-    if (!tile) return [];
+    if (!tile || this.pendingConnector) return [];
     const moves: Array<{ row: number; col: number; edges: ConnectionEdge[]; finalScore: number }> = [];
 
     for (let row = 0; row < GRID_SIZE; row++) {
       for (let col = 0; col < GRID_SIZE; col++) {
-        const cell = this.board[row][col];
-        if (cell.tile) continue;
-        const preview = this.evaluatePlacement(tile, row, col);
-        if (preview.edges.length > 0) {
-          moves.push({ row, col, edges: preview.edges, finalScore: preview.finalScore });
-        }
+        if (this.board[row][col].tile) continue;
+        const best = this.bestGapEdge(tile, row, col);
+        if (!best) continue;
+        const edge: ConnectionEdge = {
+          fromRow: row,
+          fromCol: col,
+          toRow: best.anchor.row,
+          toCol: best.anchor.col,
+          reason: best.reason,
+          points: best.points,
+        };
+        const { finalScore } = this.scoreForEdge(tile, this.board[row][col], best.points);
+        moves.push({ row, col, edges: [edge], finalScore });
       }
     }
     return moves;
   }
 
-  private evaluatePlacement(
-    tile: Tile,
-    row: number,
-    col: number,
-  ): {
-    edges: ConnectionEdge[];
-    baseScore: number;
-    connectionScore: number;
-    tileValue: number;
-    finalScore: number;
-    multiplierApplied?: MultiplierType;
-    multiplierMissed?: MultiplierType;
-  } {
-    const edges: ConnectionEdge[] = [];
-    for (const neighbor of adjacentCells(this.board, row, col)) {
-      if (!neighbor.tile) continue;
-      const reason = bestConnectionReason(tile, neighbor.tile);
-      if (reason) {
-        edges.push({
-          fromRow: row,
-          fromCol: col,
-          toRow: neighbor.row,
-          toCol: neighbor.col,
-          reason,
-          points: connectionPoints(reason),
-        });
-      }
-    }
-    const baseScore = edges.reduce((sum, e) => sum + e.points, 0);
-    const cell = this.board[row][col];
-    let connectionScore = baseScore;
-    let multiplierApplied: MultiplierType | undefined;
-    let multiplierMissed: MultiplierType | undefined;
-    if (cell.multiplier) {
-      if (baseScore > 0 && tileMatchesMultiplierType(tile, cell.multiplier)) {
-        connectionScore =
-          cell.multiplier === "CHART_BOOST"
-            ? baseScore + CHART_BOOST_FLAT_BONUS
-            : baseScore * multiplierFactor(cell.multiplier);
-        multiplierApplied = cell.multiplier;
-      } else {
-        multiplierMissed = cell.multiplier;
-      }
-    }
-    const value = tileValue(tile);
-    return {
-      edges,
-      baseScore,
-      connectionScore,
-      tileValue: value,
-      finalScore: connectionScore + value,
-      multiplierApplied,
-      multiplierMissed,
-    };
-  }
-
-  placeTile(tileIndex: number, row: number, col: number): MoveResult {
+  placeTile(tileIndex: number, row: number, col: number): PlaceTileResult {
     const tile = this.rack[tileIndex];
-    const illegal = (reason: string): MoveResult => ({
+    const illegal = (reason: string): PlaceTileResult => ({
       legal: false,
       reason,
-      edges: [],
-      baseScore: 0,
+      resolved: false,
       connectionScore: 0,
       tileValue: 0,
       finalScore: 0,
@@ -286,6 +316,9 @@ export class GameEngine {
           : "Game over — no legal moves remain.",
       );
     }
+    if (this.pendingConnector) {
+      return illegal("Resolve the pending connector guess before placing another tile.");
+    }
     if (!tile) return illegal("No tile at that rack index.");
     if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) {
       return illegal("Cell out of bounds.");
@@ -293,39 +326,127 @@ export class GameEngine {
     const cell = this.board[row][col];
     if (cell.tile) return illegal("Cell already occupied.");
 
-    const {
-      edges,
-      baseScore,
-      connectionScore,
-      tileValue: value,
-      finalScore,
-      multiplierApplied,
-      multiplierMissed,
-    } = this.evaluatePlacement(tile, row, col);
-    if (edges.length === 0) {
+    const best = this.bestGapEdge(tile, row, col);
+    if (!best) {
       return illegal(
-        "Must be orthogonally adjacent to a tile it shares a year, peak position, or collaboration with.",
+        "Must be exactly two cells from a tile it can connect to, with an empty gap between them.",
       );
     }
 
     cell.tile = tile;
     this.usedIds.add(tile.id);
     this.rack.splice(tileIndex, 1);
-    // Only top up to RACK_SIZE - a bought wildcard (see buyWildcard()) can
-    // push the rack above RACK_SIZE, and it should settle back down rather
-    // than being refilled again on the next placement.
-    if (this.rack.length < RACK_SIZE) {
-      const refill = this.drawTile();
-      if (refill) this.rack.push(refill);
+
+    if (best.reason === "WILDCARD") {
+      // Nothing real to guess - bridge the gap for free, same as a
+      // wildcard connecting for zero points under the old adjacency rule.
+      best.gap.tile = this.createWildcardTile();
+      const { connectionScore, tileValue: value, finalScore } = this.scoreForEdge(tile, cell, 0);
+      this.refillRack();
+      this.score += finalScore;
+      this.updateStatus();
+      return {
+        legal: true,
+        resolved: true,
+        edge: { fromRow: row, fromCol: col, toRow: best.anchor.row, toCol: best.anchor.col, reason: "WILDCARD", points: 0 },
+        connectionScore,
+        tileValue: value,
+        finalScore,
+        status: this.status,
+      };
     }
 
+    // A real connection type is required - don't score or reveal the
+    // answer yet. The gap cell and content tile stay on the board while
+    // placeConnector() waits for a guess.
+    this.pendingConnector = {
+      contentRow: row,
+      contentCol: col,
+      gapRow: best.gap.row,
+      gapCol: best.gap.col,
+      anchorRow: best.anchor.row,
+      anchorCol: best.anchor.col,
+    };
+    this.pendingRequiredReason = best.reason;
+
+    return {
+      legal: true,
+      resolved: false,
+      pendingConnector: this.pendingConnector,
+      connectionScore: 0,
+      tileValue: 0,
+      finalScore: 0,
+      status: this.status,
+    };
+  }
+
+  /**
+   * Answers the active pendingConnector with a guessed connection type. A
+   * wrong guess costs WRONG_CONNECTOR_PENALTY and leaves the pending gap
+   * open to retry; a correct guess fills the gap, scores the placement, and
+   * refills the rack.
+   */
+  placeConnector(guess: ConnectionCategory): PlaceConnectorResult {
+    const illegal = (reason: string): PlaceConnectorResult => ({
+      legal: false,
+      reason,
+      correct: false,
+      pointsDelta: 0,
+      connectionScore: 0,
+      tileValue: 0,
+      finalScore: 0,
+      status: this.status,
+    });
+
+    if (this.status !== "playing") {
+      return illegal("Game over — no more moves allowed.");
+    }
+    if (!this.pendingConnector || !this.pendingRequiredReason) {
+      return illegal("No connector placement is pending.");
+    }
+
+    const pending = this.pendingConnector;
+    const required = this.pendingRequiredReason;
+
+    if (guess !== required) {
+      this.score -= WRONG_CONNECTOR_PENALTY;
+      return {
+        legal: true,
+        correct: false,
+        pointsDelta: -WRONG_CONNECTOR_PENALTY,
+        connectionScore: 0,
+        tileValue: 0,
+        finalScore: 0,
+        status: this.status,
+      };
+    }
+
+    const contentCell = this.board[pending.contentRow][pending.contentCol];
+    const gapCell = this.board[pending.gapRow][pending.gapCol];
+    const tile = contentCell.tile!;
+    const points = connectionPoints(required);
+    const { connectionScore, tileValue: value, finalScore, multiplierApplied, multiplierMissed } =
+      this.scoreForEdge(tile, contentCell, points);
+
+    gapCell.tile = this.createConnectorTile(required);
     this.score += finalScore;
+    this.pendingConnector = null;
+    this.pendingRequiredReason = null;
+    this.refillRack();
     this.updateStatus();
 
     return {
       legal: true,
-      edges,
-      baseScore,
+      correct: true,
+      pointsDelta: finalScore,
+      edge: {
+        fromRow: pending.contentRow,
+        fromCol: pending.contentCol,
+        toRow: pending.anchorRow,
+        toCol: pending.anchorCol,
+        reason: required,
+        points,
+      },
       multiplierApplied,
       multiplierMissed,
       connectionScore,

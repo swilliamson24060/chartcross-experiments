@@ -4,18 +4,30 @@ function tileYears(tile: MatchableTile): number[] {
   return tile.kind === "SONG" ? [tile.peakYear] : tile.years;
 }
 
-function tilePeaks(tile: MatchableTile): number[] {
-  return tile.kind === "SONG" ? [tile.peakPos] : tile.peaks;
+function tileDecades(tile: MatchableTile): number[] {
+  return tileYears(tile).map((y) => Math.floor(y / 10) * 10);
 }
 
-function intersects(a: number[], b: number[]): boolean {
+function intersects<T>(a: T[], b: T[]): boolean {
   const set = new Set(a);
   return b.some((v) => set.has(v));
 }
 
+/** ARTIST-ARTIST only: two artists who worked together, per collaboratorIds. */
 function isCollab(a: MatchableTile, b: MatchableTile): boolean {
   if (a.kind === "ARTIST" && b.kind === "ARTIST") {
     return a.collaboratorIds.includes(b.id);
+  }
+  return false;
+}
+
+/**
+ * Shared performer: two songs performed by the same artist, or a song and
+ * the artist who performed it. Does not apply ARTIST-ARTIST - that's COLLAB.
+ */
+function isSameArtist(a: MatchableTile, b: MatchableTile): boolean {
+  if (a.kind === "SONG" && b.kind === "SONG") {
+    return intersects(a.performerIds, b.performerIds);
   }
   if (a.kind === "ARTIST" && b.kind === "SONG") {
     return b.performerIds.includes(a.id);
@@ -23,8 +35,11 @@ function isCollab(a: MatchableTile, b: MatchableTile): boolean {
   if (a.kind === "SONG" && b.kind === "ARTIST") {
     return a.performerIds.includes(b.id);
   }
-  // SONG-SONG: no collaboration tier, only artists collaborate.
   return false;
+}
+
+function isSameDecade(a: MatchableTile, b: MatchableTile): boolean {
+  return intersects(tileDecades(a), tileDecades(b));
 }
 
 /**
@@ -35,13 +50,15 @@ function isCollab(a: MatchableTile, b: MatchableTile): boolean {
  * A wildcard tile connects to anything (and anything connects to it) worth
  * zero points - it's a rescue/bridging tool, not a scoring play. It also
  * stays wild permanently: once placed, any future neighbor of it is legal
- * too, since this same check runs for every adjacent pair on the board.
+ * too, since this same check runs for every pair the gap-placement rule
+ * considers.
  */
 export function bestConnectionReason(a: Tile, b: Tile): ConnectionReason | null {
   if (a.kind === "WILDCARD" || b.kind === "WILDCARD") return "WILDCARD";
+  if (a.kind === "CONNECTOR" || b.kind === "CONNECTOR") return null;
   if (isCollab(a, b)) return "COLLAB";
-  if (intersects(tilePeaks(a), tilePeaks(b))) return "PEAK";
-  if (intersects(tileYears(a), tileYears(b))) return "YEAR";
+  if (isSameArtist(a, b)) return "ARTIST";
+  if (isSameDecade(a, b)) return "DECADE";
   return null;
 }
 

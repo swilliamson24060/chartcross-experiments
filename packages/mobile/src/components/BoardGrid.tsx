@@ -9,6 +9,7 @@ interface Props {
   board: Board;
   cellSize: number;
   highlightCells: Set<string>;
+  pendingGapCell?: { row: number; col: number } | null;
   onCellPress: (row: number, col: number) => void;
 }
 
@@ -38,7 +39,7 @@ const MULTIPLIER_TIER: Record<MultiplierType, 2 | 3 | 1> = {
   CHART_BOOST: 1,
 };
 
-export function BoardGrid({ board, cellSize, highlightCells, onCellPress }: Props) {
+export function BoardGrid({ board, cellSize, highlightCells, pendingGapCell, onCellPress }: Props) {
   const size = cellSize * GRID_SIZE;
   return (
     <View style={[styles.board, { width: size, height: size }]}>
@@ -46,6 +47,8 @@ export function BoardGrid({ board, cellSize, highlightCells, onCellPress }: Prop
         <View key={rowIndex} style={styles.row}>
           {row.map((cell) => {
             const isHighlighted = highlightCells.has(`${cell.row},${cell.col}`);
+            const isPendingGap =
+              pendingGapCell?.row === cell.row && pendingGapCell?.col === cell.col;
             const tier = cell.multiplier ? MULTIPLIER_TIER[cell.multiplier] : undefined;
             const multiplierColor = cell.multiplier ? MULTIPLIER_COLORS[cell.multiplier] : undefined;
             return (
@@ -57,14 +60,21 @@ export function BoardGrid({ board, cellSize, highlightCells, onCellPress }: Prop
                   {
                     width: cellSize,
                     height: cellSize,
-                    borderColor: isHighlighted
-                      ? colors.year
+                    borderColor: isPendingGap
+                      ? colors.pendingGap
+                      : isHighlighted
+                        ? colors.decade
+                        : tier === 3
+                          ? multiplierColor
+                          : colors.cellBorder,
+                    borderWidth: isPendingGap ? 3 : isHighlighted ? 2 : tier === 3 ? 2 : 1,
+                    backgroundColor: isPendingGap
+                      ? `${colors.pendingGap}22`
                       : tier === 3
-                        ? multiplierColor
-                        : colors.cellBorder,
-                    borderWidth: isHighlighted ? 2 : tier === 3 ? 2 : 1,
-                    backgroundColor:
-                      tier === 3 ? `${multiplierColor}33` : tier === 2 ? `${multiplierColor}15` : colors.cellEmpty,
+                        ? `${multiplierColor}33`
+                        : tier === 2
+                          ? `${multiplierColor}15`
+                          : colors.cellEmpty,
                   },
                 ]}
               >

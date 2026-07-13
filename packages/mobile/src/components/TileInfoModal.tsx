@@ -1,6 +1,6 @@
 import React from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { tileValue, type Cell, type Dataset, type SongTile } from "@chartcross/engine";
+import { tileLabel, tileValue, type Cell, type Dataset, type SongTile } from "@chartcross/engine";
 import { colors } from "../theme";
 
 interface Props {
@@ -20,7 +20,14 @@ export function TileInfoModal({ cell, dataset, onClose }: Props) {
 
   const isArtist = tile.kind === "ARTIST";
   const isWildcard = tile.kind === "WILDCARD";
-  const accent = isWildcard ? colors.wildcard : isArtist ? colors.artist : colors.song;
+  const isConnector = tile.kind === "CONNECTOR";
+  const accent = isConnector
+    ? colors.connectorArtist
+    : isWildcard
+      ? colors.wildcard
+      : isArtist
+        ? colors.artist
+        : colors.song;
   const value = tileValue(tile);
 
   let title = "";
@@ -53,6 +60,9 @@ export function TileInfoModal({ cell, dataset, onClose }: Props) {
       { label: "Peak Position", value: bestSong ? `#${bestSong.peakPos}` : "—" },
       { label: "Point Value", value: `${value} pt${value === 1 ? "" : "s"}` },
     ];
+  } else if (tile.kind === "CONNECTOR") {
+    title = tileLabel(tile);
+    rows = [{ label: "Fills a gap between", value: "Two tiles with a matching connection" }];
   } else {
     title = "★ Wildcard";
     rows = [{ label: "Connects to", value: "Anything, worth 0 points" }];

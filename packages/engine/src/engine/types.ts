@@ -25,7 +25,18 @@ export interface WildcardTile {
   id: string;
 }
 
-export type Tile = SongTile | ArtistTile | WildcardTile;
+/** One of the three always-available connection-type tiles. */
+export type ConnectionCategory = "COLLAB" | "ARTIST" | "DECADE";
+
+export const CONNECTION_CATEGORIES: ConnectionCategory[] = ["COLLAB", "ARTIST", "DECADE"];
+
+export interface ConnectorTile {
+  kind: "CONNECTOR";
+  id: string;
+  connectionType: ConnectionCategory;
+}
+
+export type Tile = SongTile | ArtistTile | WildcardTile | ConnectorTile;
 export type MatchableTile = SongTile | ArtistTile;
 
 export type MultiplierType =
@@ -60,14 +71,17 @@ export type Board = Cell[][]; // board[row][col]
  */
 export type GameStatus = "playing" | "bridged" | "stuck";
 
-export type ConnectionReason = "YEAR" | "PEAK" | "COLLAB" | "WILDCARD";
+export type ConnectionReason = ConnectionCategory | "WILDCARD";
 
 export const REASON_POINTS: Record<ConnectionReason, number> = {
-  YEAR: 5,
-  PEAK: 7,
+  DECADE: 5,
+  ARTIST: 12,
   COLLAB: 20,
   WILDCARD: 0,
 };
+
+/** Points lost each time a connector guess is wrong; the pending gap stays open to retry. */
+export const WRONG_CONNECTOR_PENALTY = 2;
 
 export interface ConnectionEdge {
   fromRow: number;
@@ -78,14 +92,46 @@ export interface ConnectionEdge {
   points: number;
 }
 
-export interface MoveResult {
+/**
+ * A content tile has been placed two cells from an anchor tile, and the gap
+ * cell between them is waiting for a connector guess via
+ * GameEngine.placeConnector().
+ */
+export interface PendingConnector {
+  contentRow: number;
+  contentCol: number;
+  gapRow: number;
+  gapCol: number;
+  anchorRow: number;
+  anchorCol: number;
+}
+
+export interface PlaceTileResult {
   legal: boolean;
   reason?: string;
-  edges: ConnectionEdge[];
-  baseScore: number;
+  /** True once the placement is fully scored - either it resolved immediately (wildcard) or a connector was never needed. False while a connector guess is pending. */
+  resolved: boolean;
+  pendingConnector?: PendingConnector;
+  edge?: ConnectionEdge;
   /** Set only when landing on a bonus cell actually boosted the score. */
   multiplierApplied?: MultiplierType;
   /** Set when the tile landed on a bonus cell but the bonus didn't apply (wrong tile type, wildcard, or a zero-point connection). */
+  multiplierMissed?: MultiplierType;
+  connectionScore: number;
+  tileValue: number;
+  finalScore: number;
+  status: GameStatus;
+}
+
+export interface PlaceConnectorResult {
+  legal: boolean;
+  reason?: string;
+  /** Whether the guessed connection type matched the hidden required reason. */
+  correct: boolean;
+  /** Score change from this guess: -WRONG_CONNECTOR_PENALTY when wrong, the placement's finalScore when right. */
+  pointsDelta: number;
+  edge?: ConnectionEdge;
+  multiplierApplied?: MultiplierType;
   multiplierMissed?: MultiplierType;
   connectionScore: number;
   tileValue: number;
