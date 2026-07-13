@@ -130,6 +130,7 @@ export default function App() {
   }
 
   const levelName = LEVEL_NAMES[(levelNumber - 1) % LEVEL_NAMES.length];
+  const canBuyWild = gameState.status === "playing" && gameState.score >= WILD_TILE_COST;
 
   return (
     <View style={styles.app}>
@@ -138,6 +139,14 @@ export default function App() {
         <View style={[styles.headerSpacer, styles.headerSpacerLeft]}>
           <Pressable style={styles.headerIconButton} onPress={handleHint} hitSlop={8}>
             <Text style={styles.headerIconText}>💡</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.headerIconButton, !canBuyWild && styles.headerIconButtonDisabled]}
+            onPress={handleBuyWild}
+            disabled={!canBuyWild}
+            hitSlop={8}
+          >
+            <Text style={styles.headerIconText}>✨</Text>
           </Pressable>
         </View>
         <Text style={styles.title}>CHART CROSS</Text>
@@ -185,8 +194,6 @@ export default function App() {
           selectedIndex={selectedIndex}
           onSelect={handleSelectRackTile}
           onShuffle={handleShuffle}
-          onBuyWild={handleBuyWild}
-          canBuyWild={gameState.status === "playing" && gameState.score >= WILD_TILE_COST}
         />
       </ScrollView>
 
@@ -234,6 +241,9 @@ const styles = StyleSheet.create({
   },
   headerIconButton: {
     padding: 4,
+  },
+  headerIconButtonDisabled: {
+    opacity: 0.35,
   },
   headerIconText: {
     fontSize: 20,
