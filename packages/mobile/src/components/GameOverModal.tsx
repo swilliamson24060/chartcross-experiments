@@ -7,6 +7,7 @@ interface Props {
   status: GameStatus;
   penaltyApplied: number;
   rackSize: number;
+  finalScore: number;
   onRestart: () => void;
 }
 
@@ -18,7 +19,7 @@ function tiles(n: number): string {
   return `${n} tile${n === 1 ? "" : "s"}`;
 }
 
-export function GameOverModal({ status, penaltyApplied, rackSize, onRestart }: Props) {
+export function GameOverModal({ status, penaltyApplied, rackSize, finalScore, onRestart }: Props) {
   if (status === "playing") return null;
 
   const title = status === "bridged" ? "BOARD BRIDGED" : "NO MOVES LEFT";
@@ -32,6 +33,8 @@ export function GameOverModal({ status, penaltyApplied, rackSize, onRestart }: P
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <Text style={styles.title}>{title}</Text>
+          <Text style={styles.finalScoreLabel}>FINAL SCORE</Text>
+          <Text style={styles.finalScoreValue}>{finalScore.toLocaleString()}</Text>
           <Text style={styles.body}>{body}</Text>
           <Pressable style={styles.button} onPress={onRestart}>
             <Text style={styles.buttonText}>TRY AGAIN ↻</Text>
@@ -65,7 +68,19 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "800",
     letterSpacing: 1,
-    marginBottom: 10,
+    marginBottom: 14,
+  },
+  finalScoreLabel: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+  },
+  finalScoreValue: {
+    color: colors.textPrimary,
+    fontSize: 36,
+    fontWeight: "800",
+    marginBottom: 14,
   },
   body: {
     color: colors.textPrimary,

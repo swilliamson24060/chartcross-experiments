@@ -175,6 +175,7 @@ export default function App() {
         status={gameState.status}
         penaltyApplied={gameState.penaltyApplied}
         rackSize={gameState.rack.length}
+        finalScore={gameState.score}
         onRestart={handleRestart}
       />
     </View>
