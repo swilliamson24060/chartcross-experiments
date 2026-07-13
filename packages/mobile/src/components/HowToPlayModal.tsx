@@ -106,8 +106,7 @@ export function HowToPlayModal({ visible, onClose }: Props) {
             <Section title="PLACING TILES">
               <Text style={styles.body}>
                 Tap a rack tile, then tap a highlighted cell two squares away from a tile already
-                on the board, in a straight line, with an empty gap between them — or if it's a ★
-                Wildcard, which bridges the gap to anything for free.
+                on the board, in a straight line, with an empty gap between them.
               </Text>
             </Section>
 
@@ -124,6 +123,12 @@ export function HowToPlayModal({ visible, onClose }: Props) {
                 Guess wrong and you lose {WRONG_CONNECTOR_PENALTY} points, but the gap stays open
                 — just try a different connector. The connector tiles themselves never run out.
               </Text>
+              <Text style={styles.body}>
+                Not sure? A ★ Wild connector (bought with ✨ BUY WILD) always fills the gap
+                correctly for +{REASON_POINTS.WILDCARD} connection points — a guaranteed rescue,
+                not a scoring play. Wildcards can only ever be used this way, never placed as a
+                rack tile.
+              </Text>
             </Section>
 
             <Section title="SCORING">
@@ -136,7 +141,8 @@ export function HowToPlayModal({ visible, onClose }: Props) {
               <Text style={styles.body}>
                 Landing on a 2X or 3X SONG/ARTIST cell multiplies your connection score if the
                 tile type matches. CHART BOOST adds a flat +{CHART_BOOST_FLAT_BONUS}. Multipliers
-                never apply to Wildcards or connector tiles.
+                never apply to connector tiles (Wild included) — if one ends up on a gap cell, it
+                hops to a fresh spot on the board instead of going to waste.
               </Text>
             </Section>
 
@@ -156,7 +162,8 @@ export function HowToPlayModal({ visible, onClose }: Props) {
               <Text style={styles.bullet}>💡 HINT — selects a playable tile and highlights where it can go.</Text>
               <Text style={styles.bullet}>⇄ SHUFFLE — reorders your rack.</Text>
               <Text style={styles.bullet}>
-                ✨ BUY WILD ({WILD_TILE_COST}) — spend points to add a wildcard tile to your rack.
+                ✨ BUY WILD ({WILD_TILE_COST}) — spend points for a ★ Wild connector charge, usable
+                any time to resolve a pending guess for free.
               </Text>
               <Text style={styles.bullet}>📊 CONNECTIONS — view every scored connection on the board.</Text>
               <Text style={styles.bullet}>Tap any placed tile to see its full details.</Text>
