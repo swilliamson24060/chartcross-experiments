@@ -149,7 +149,7 @@ export function HowToPlayModal({ visible, onClose }: Props) {
             <Section title="GAME OVER — WATCH OUT" color={colors.illegal}>
               <Text style={styles.body}>
                 The game ends immediately, and you lose points equal to the total value of every
-                tile left in your rack, if STARTER and END ANCHOR become linked by a path of
+                tile left in your rack, if STARTER and ANCHOR become linked by a path of
                 touching tiles — even tiles that don't score anything together.
               </Text>
               <Text style={styles.body}>

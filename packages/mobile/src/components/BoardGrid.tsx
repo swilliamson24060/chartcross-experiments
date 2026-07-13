@@ -103,7 +103,7 @@ export function BoardGrid({ board, cellSize, highlightCells, pendingActionCell, 
                 )}
                 {cell.role === "END_ANCHOR" && (
                   <Text style={[styles.roleLabel, styles.roleLabelAbove, { color: colors.endAnchor }]}>
-                    END ANCHOR
+                    ANCHOR
                   </Text>
                 )}
               </Pressable>

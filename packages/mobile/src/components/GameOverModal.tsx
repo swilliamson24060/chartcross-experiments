@@ -25,7 +25,7 @@ export function GameOverModal({ status, penaltyApplied, rackSize, finalScore, on
   const title = status === "bridged" ? "BOARD BRIDGED" : "NO MOVES LEFT";
   const body =
     status === "bridged"
-      ? `STARTER and END ANCHOR are now linked by a path of touching tiles. You lose ${pts(penaltyApplied)} for the ${tiles(rackSize)} left in your rack.`
+      ? `STARTER and ANCHOR are now linked by a path of touching tiles. You lose ${pts(penaltyApplied)} for the ${tiles(rackSize)} left in your rack.`
       : `None of your rack tiles can be legally placed. You lose ${pts(penaltyApplied)} for the ${tiles(rackSize)} left in your rack.`;
 
   return (
