@@ -149,17 +149,15 @@ export function HowToPlayModal({ visible, onClose }: Props) {
             <Section title="GAME OVER — WATCH OUT" color={colors.illegal}>
               <Text style={styles.body}>
                 The game ends immediately, and you lose points equal to the total value of every
-                tile left in your rack, if either of these happens:
+                tile left in your rack, if STARTER and END ANCHOR become linked by a path of
+                touching tiles — even tiles that don't score anything together.
               </Text>
-              <Text style={styles.bullet}>
-                •  STARTER and END ANCHOR become linked by a path of touching tiles — even tiles
-                that don't score anything together.
-              </Text>
-              <Text style={styles.bullet}>
-                •  None of your rack tiles have any legal placement left — unless you're holding a
-                ★ Wild connector, in which case you get a rescue: tap the ★ WILD chip, tap an empty
+              <Text style={styles.body}>
+                Running out of legal moves doesn't end the game outright anymore. If you're
+                holding a ★ Wild connector, you get a rescue: tap the ★ WILD chip, tap an empty
                 board cell next to any placed tile with empty space beyond it, then place any rack
-                tile there for free. It keeps the game going but scores no points at all.
+                tile there for free (no points). If you're not holding one, you're asked to either
+                buy one to open up a rescue, or end the game right there and take the penalty.
               </Text>
             </Section>
 

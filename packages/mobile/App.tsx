@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,6 +26,7 @@ import { TileInfoModal } from "./src/components/TileInfoModal";
 import { ConnectionsListModal } from "./src/components/ConnectionsListModal";
 import { GameOverModal } from "./src/components/GameOverModal";
 import { HowToPlayModal } from "./src/components/HowToPlayModal";
+import { StuckModal } from "./src/components/StuckModal";
 
 const LEVEL_NAMES = [
   "THE COLLABORATIVE WEB",
@@ -65,6 +67,23 @@ export default function App() {
     !pendingWildRescue &&
     gameState.wildcardConnectors > 0 &&
     !engineRef.current.hasAnyLegalMove();
+
+  const noLegalMoves =
+    gameState.status === "playing" &&
+    !pendingConnector &&
+    !pendingWildRescue &&
+    !engineRef.current.hasAnyLegalMove();
+
+  // Fires once right when the board runs out of real moves, whether or not
+  // a wild connector is on hand to rescue it - awaitingStuckDecision (below)
+  // takes over from there if one isn't.
+  const wasStuckRef = useRef(false);
+  useEffect(() => {
+    if (noLegalMoves && !wasStuckRef.current) {
+      showToast("No legal moves left — you'll need a ★ Wild connector to continue.", true);
+    }
+    wasStuckRef.current = noLegalMoves;
+  }, [noLegalMoves]);
 
   const legalMoves = useMemo(() => {
     if (selectedIndex === null || pendingConnector || pendingWildRescue) return [];
@@ -238,6 +257,15 @@ export default function App() {
     showScoreToast(result);
   }
 
+  function handleEndStuckGame() {
+    const result = engineRef.current.endStuckGame();
+    refresh();
+    if (!result.legal) {
+      showToast(result.reason ?? "Can't end the game right now.", true);
+    }
+    // A successful end is announced by GameOverModal, driven off status below.
+  }
+
   function handleToggleRescue() {
     if (!stuckRescueAvailable) return;
     setSelectedIndex(null);
@@ -348,6 +376,13 @@ export default function App() {
         finalScore={gameState.score}
         onRestart={handleRestart}
       />
+      <StuckModal
+        visible={gameState.awaitingStuckDecision}
+        cost={WILD_TILE_COST}
+        canAfford={gameState.score >= WILD_TILE_COST}
+        onBuyWild={handleBuyWild}
+        onEndGame={handleEndStuckGame}
+      />
       <HowToPlayModal visible={showHowToPlay} onClose={() => setShowHowToPlay(false)} />
     </View>
   );
@@ -357,7 +392,10 @@ const styles = StyleSheet.create({
   app: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingTop: 48,
+    // Web (this app's actual deploy target) has no OS status bar to clear -
+    // that 48px was pure dead space above the header on a phone browser.
+    // Native builds still get real clearance if this is ever run there.
+    paddingTop: Platform.OS === "web" ? 8 : 48,
   },
   header: {
     backgroundColor: colors.headerBackground,
@@ -418,10 +456,10 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   boardWrap: {
-    marginBottom: 8,
+    marginBottom: 2,
   },
   toastSlot: {
-    height: 28,
+    height: 20,
     justifyContent: "center",
   },
   toast: {
@@ -433,6 +471,6 @@ const styles = StyleSheet.create({
     color: colors.illegal,
   },
   connectorSlot: {
-    marginBottom: 16,
+    marginBottom: 6,
   },
 });

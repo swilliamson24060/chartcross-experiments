@@ -56,6 +56,14 @@ export interface GameState {
   pendingWildRescue: PendingWildRescue | null;
   /** Wild connector charges bought via buyWildcard(), spendable with useWildcardConnector() or startWildRescue(). */
   wildcardConnectors: number;
+  /**
+   * True once no rack tile has a legal move and there's no wild rescue to
+   * fall back on either (no charges, or no valid rescue spot on the
+   * board). The player must buyWildcard() to open up a rescue, or call
+   * endStuckGame() to give up. Always false with a guess or rescue already
+   * pending - resolve those first.
+   */
+  awaitingStuckDecision: boolean;
 }
 
 interface BestGapEdge {
@@ -107,17 +115,20 @@ export class GameEngine {
   }
 
   /**
-   * Checks for the two ways a game can end. "Bridged" is a pure board
-   * condition (tiles are never removed, so once true it stays true) and is
-   * checked first - if the board is already bridged there's no point
-   * trying to rescue the rack. Otherwise we make a best effort to keep the
-   * rack playable via ensurePlayableRack() before accepting "stuck" - and
-   * even then, a spendable wild connector with somewhere to go
-   * (canWildRescue()) holds off "stuck" too, since the player can still
-   * bridge the board via startWildRescue()/completeWildRescue().
+   * Checks for "bridged", the one way a game ends automatically. It's a
+   * pure board condition (tiles are never removed, so once true it stays
+   * true) - if the board is already bridged there's no point trying to
+   * rescue the rack. Otherwise we make a best effort to keep the rack
+   * playable via ensurePlayableRack().
    *
-   * No-ops once the game is already over: both end states are terminal, so
-   * this should only ever actually transition status once per game.
+   * Running out of legal moves is *not* handled here anymore - it's no
+   * longer an automatic ending. See GameState.awaitingStuckDecision: the
+   * player either rescues via a wild connector (buyWildcard() then
+   * startWildRescue()/completeWildRescue(), or useWildcardConnector() on an
+   * existing pending guess) or explicitly gives up via endStuckGame().
+   *
+   * No-ops once the game is already over: "bridged" is terminal, so this
+   * should only ever actually transition status once per game.
    */
   private updateStatus(): void {
     if (this.status !== "playing") return;
@@ -126,9 +137,6 @@ export class GameEngine {
       return;
     }
     this.ensurePlayableRack();
-    if (!this.hasAnyLegalMove() && !this.canWildRescue()) {
-      this.endGame("stuck");
-    }
   }
 
   private canWildRescue(): boolean {
@@ -193,12 +201,21 @@ export class GameEngine {
     return result;
   }
 
-  private createWildcardTile(): WildcardTile {
-    return { kind: "WILDCARD", id: `wild-${this.wildcardCounter++}` };
+  /**
+   * The link coords are optional only so bare test/preview objects can omit
+   * them - every real gap-fill placement always passes the two cells it
+   * links, since getAllConnections() reads them directly rather than
+   * inferring from adjacency (see WildcardTile.contentRow).
+   */
+  private createWildcardTile(link?: { contentRow: number; contentCol: number; anchorRow: number; anchorCol: number }): WildcardTile {
+    return { kind: "WILDCARD", id: `wild-${this.wildcardCounter++}`, ...link };
   }
 
-  private createConnectorTile(connectionType: ConnectionCategory): ConnectorTile {
-    return { kind: "CONNECTOR", id: `connector-${this.connectorCounter++}`, connectionType };
+  private createConnectorTile(
+    connectionType: ConnectionCategory,
+    link: { contentRow: number; contentCol: number; anchorRow: number; anchorCol: number },
+  ): ConnectorTile {
+    return { kind: "CONNECTOR", id: `connector-${this.connectorCounter++}`, connectionType, ...link };
   }
 
   /**
@@ -235,6 +252,12 @@ export class GameEngine {
       pendingConnector: this.pendingConnector,
       pendingWildRescue: this.pendingWildRescue,
       wildcardConnectors: this.wildcardConnectors,
+      awaitingStuckDecision:
+        this.status === "playing" &&
+        !this.pendingConnector &&
+        !this.pendingWildRescue &&
+        !this.hasAnyLegalMove() &&
+        !this.canWildRescue(),
     };
   }
 
@@ -435,7 +458,12 @@ export class GameEngine {
     const { connectionScore, tileValue: value, finalScore, multiplierApplied, multiplierMissed } =
       this.scoreForEdge(tile, contentCell, points);
 
-    gapCell.tile = this.createConnectorTile(required);
+    gapCell.tile = this.createConnectorTile(required, {
+      contentRow: pending.contentRow,
+      contentCol: pending.contentCol,
+      anchorRow: pending.anchorRow,
+      anchorCol: pending.anchorCol,
+    });
     relocateMultiplier(this.board, this.rng, gapCell);
     this.score += finalScore;
     this.pendingConnector = null;
@@ -498,7 +526,12 @@ export class GameEngine {
     const tile = contentCell.tile!;
     const { connectionScore, tileValue: value, finalScore } = this.scoreForEdge(tile, contentCell, 0);
 
-    gapCell.tile = this.createWildcardTile();
+    gapCell.tile = this.createWildcardTile({
+      contentRow: pending.contentRow,
+      contentCol: pending.contentCol,
+      anchorRow: pending.anchorRow,
+      anchorCol: pending.anchorCol,
+    });
     relocateMultiplier(this.board, this.rng, gapCell);
     this.wildcardConnectors--;
     this.score += finalScore;
@@ -582,7 +615,12 @@ export class GameEngine {
       return illegal("That cell must be empty, next to a placed tile, with empty space on the far side.");
     }
 
-    pairing.gap.tile = this.createWildcardTile();
+    pairing.gap.tile = this.createWildcardTile({
+      contentRow: pairing.content.row,
+      contentCol: pairing.content.col,
+      anchorRow: pairing.anchor.row,
+      anchorCol: pairing.anchor.col,
+    });
     relocateMultiplier(this.board, this.rng, pairing.gap);
     this.wildcardConnectors--;
     this.pendingWildRescue = {
@@ -657,5 +695,27 @@ export class GameEngine {
     this.score -= WILD_TILE_COST;
     this.wildcardConnectors++;
     return { success: true, cost: WILD_TILE_COST, scoreAfter: this.score };
+  }
+
+  /**
+   * Voluntarily ends the game while stuck with no wild rescue available -
+   * the alternative to buyWildcard() (see GameState.awaitingStuckDecision).
+   * Docks the same rack-value penalty as any other stuck ending.
+   */
+  endStuckGame(): WildRescueResult {
+    const illegal = (reason: string): WildRescueResult => ({ legal: false, reason, status: this.status });
+
+    if (this.status !== "playing") {
+      return illegal("Game is already over.");
+    }
+    if (this.pendingConnector || this.pendingWildRescue) {
+      return illegal("Resolve the pending connector guess or rescue placement first.");
+    }
+    if (this.hasAnyLegalMove() || this.canWildRescue()) {
+      return illegal("A move is still available - this is only for when you're truly stuck.");
+    }
+
+    this.endGame("stuck");
+    return { legal: true, status: this.status };
   }
 }

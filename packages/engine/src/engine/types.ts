@@ -23,6 +23,18 @@ export interface ArtistTile {
 export interface WildcardTile {
   kind: "WILDCARD";
   id: string;
+  /**
+   * Set when placed as a gap-fill via useWildcardConnector() or
+   * startWildRescue() - the two cells it links, read directly rather than
+   * inferred from adjacency (a gap cell can end up with more than two
+   * occupied neighbors once the board fills up, so "nearest two tiles"
+   * isn't reliable). Undefined for a bare wildcard object outside of a real
+   * board placement.
+   */
+  contentRow?: number;
+  contentCol?: number;
+  anchorRow?: number;
+  anchorCol?: number;
 }
 
 /** One of the three always-available connection-type tiles. */
@@ -34,6 +46,14 @@ export interface ConnectorTile {
   kind: "CONNECTOR";
   id: string;
   connectionType: ConnectionCategory;
+  /**
+   * The two content cells this connector links, read directly rather than
+   * inferred from adjacency - see WildcardTile's contentRow for why.
+   */
+  contentRow: number;
+  contentCol: number;
+  anchorRow: number;
+  anchorCol: number;
 }
 
 export type Tile = SongTile | ArtistTile | WildcardTile | ConnectorTile;

@@ -204,7 +204,23 @@ console.log("\ngetAllConnections reads placed connector tiles:");
     bestConnectionReason(starter, brunoMars) === "COLLAB",
   );
   board[GRID_SIZE - 1][2].tile = brunoMars; // anchor, 2 cells right of STARTER
-  board[GRID_SIZE - 1][1].tile = { kind: "CONNECTOR", id: "test-connector", connectionType: "COLLAB" };
+  board[GRID_SIZE - 1][1].tile = {
+    kind: "CONNECTOR",
+    id: "test-connector",
+    connectionType: "COLLAB",
+    contentRow: GRID_SIZE - 1,
+    contentCol: 0,
+    anchorRow: GRID_SIZE - 1,
+    anchorCol: 2,
+  };
+
+  // A third, unrelated tile also touching the connector cell (e.g. placed
+  // by a completely different move later in the game) must not confuse
+  // which pair the connector actually links - this is exactly the bug
+  // where a crowded board could report the wrong two tiles for a
+  // correctly-validated connection.
+  const unrelated = findArtist(dataset, "Dolly Parton");
+  board[GRID_SIZE - 2][1].tile = unrelated;
 
   const connections = getAllConnections(board);
   check("getAllConnections finds exactly the one connector-linked pair", connections.length === 1);
@@ -213,6 +229,10 @@ console.log("\ngetAllConnections reads placed connector tiles:");
   const tileIds = connections.length
     ? new Set([connections[0].tileA.id, connections[0].tileB.id])
     : new Set<string>();
+  check(
+    "The crowding third tile is not mistaken for one side of the connection",
+    !tileIds.has(unrelated.id),
+  );
   check(
     "The connection references STARTER and Bruno Mars, not the connector itself",
     tileIds.has(starter.id) && tileIds.has(brunoMars.id) && !tileIds.has("test-connector"),
@@ -487,6 +507,10 @@ console.log("\nWild rescue checks:");
       );
       const gapCells = engine.legalWildRescueGapCells();
       check(`Seed ${seed}: at least one rescue gap cell is available`, gapCells.length > 0);
+      check(
+        `Seed ${seed}: awaitingStuckDecision is false once buying a wild connector opens up a rescue`,
+        engine.getState().awaitingStuckDecision === false,
+      );
       if (gapCells.length === 0) continue;
 
       const rackBefore = engine.getState().rack.length;
@@ -536,6 +560,63 @@ console.log("\nWild rescue checks:");
     }
   }
   check("Found a seed where a wild rescue could be exercised end-to-end within 30 tries", rescued);
+}
+
+console.log("\nStuck decision checks:");
+{
+  const fresh = new GameEngine(dataset, 50, 1);
+  check("A fresh game is not awaiting a stuck decision", fresh.getState().awaitingStuckDecision === false);
+
+  const earlyEnd = fresh.endStuckGame();
+  check("endStuckGame() fails while a real move is still available", earlyEnd.legal === false);
+  check("A rejected endStuckGame() leaves the game playing", fresh.getState().status === "playing");
+
+  // Play greedily (never buying a wild connector) until genuinely stuck -
+  // with wildcardConnectors at 0 throughout, awaitingStuckDecision should
+  // flip on exactly when hasAnyLegalMove() does, and the game must NOT end
+  // itself; it should just sit there until endStuckGame() is called.
+  let foundStuck = false;
+  for (let seed = 0; seed < 15 && !foundStuck; seed++) {
+    const engine = new GameEngine(dataset, 51, seed);
+    let guard = 0;
+    while (engine.getState().status === "playing" && engine.hasAnyLegalMove() && guard++ < 200) {
+      const rack = engine.getState().rack;
+      for (let i = 0; i < rack.length; i++) {
+        const moves = engine.legalMovesForRackTile(i);
+        if (moves.length > 0) {
+          resolveMove(engine, i, moves[0]);
+          break;
+        }
+      }
+    }
+
+    if (engine.getState().status === "playing" && !engine.hasAnyLegalMove()) {
+      foundStuck = true;
+      check("wildcardConnectors is 0 - this loop never bought one", engine.getState().wildcardConnectors === 0);
+      check("awaitingStuckDecision is true once out of moves with no rescue available", engine.getState().awaitingStuckDecision === true);
+      check("The game does not end itself just for running out of moves", engine.getState().status === "playing");
+
+      const scoreBefore = engine.getState().score;
+      const expectedPenalty = engine.getState().rack.reduce((sum, t) => sum + tileValue(t), 0);
+
+      const result = engine.endStuckGame();
+      check("endStuckGame() succeeds once truly stuck with no rescue", result.legal === true);
+      check("Status transitions to stuck", engine.getState().status === "stuck");
+      check(
+        "penaltyApplied matches the value of the tiles left in the rack",
+        engine.getState().penaltyApplied === expectedPenalty,
+      );
+      check(
+        "Score drops by exactly the penalty",
+        engine.getState().score === scoreBefore - engine.getState().penaltyApplied,
+      );
+      check("awaitingStuckDecision is false once the game is over", engine.getState().awaitingStuckDecision === false);
+
+      const again = engine.endStuckGame();
+      check("endStuckGame() fails once the game is already over", again.legal === false);
+    }
+  }
+  check("Found a seed that genuinely ran out of moves within 15 tries", foundStuck);
 }
 
 console.log("\nMultiplier relocation checks:");
@@ -693,7 +774,14 @@ console.log("\nGame-ending status checks:");
           break;
         }
       }
-      if (!played) break; // status is "playing" but no move found - shouldn't happen
+      if (!played) {
+        // No rack tile has a legal move anymore - the game no longer ends
+        // itself here, so give up explicitly rather than buy more wild
+        // connectors indefinitely (this loop never buys any, so
+        // endStuckGame() should always be legal once truly stuck).
+        const gaveUp = engine.endStuckGame();
+        if (!gaveUp.legal) break; // a wild rescue is still available - leave this seed "playing"
+      }
     }
 
     const finalState = engine.getState();
@@ -797,7 +885,10 @@ console.log("\nBuy wildcard blocked once game is over:");
         break;
       }
     }
-    if (!played) break;
+    if (!played) {
+      const gaveUp = engine.endStuckGame();
+      if (!gaveUp.legal) break;
+    }
   }
   check("Game reached a terminal state to test purchase blocking", engine.getState().status !== "playing");
   const blocked = engine.buyWildcard();
