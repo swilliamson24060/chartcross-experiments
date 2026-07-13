@@ -119,6 +119,21 @@ _SPLIT_RE = re.compile(
 
 _PLACEHOLDER = "\x00{}\x00"
 
+# Generic backing-ensemble descriptors that show up as their own comma/&
+# separated fragment (e.g. "Reg Owen & His Orchestra" splits into "Reg Owen"
+# and "His Orchestra"). Unlike a real band name (Bill Haley's "Comets"),
+# this exact phrase is reused by dozens of unrelated 1950s-60s bandleaders,
+# so treating it as one shared "artist" merges their distinct chart
+# histories into a single bogus decades-spanning entity. Dropped entirely
+# rather than kept as a phantom performer - the named artist is the real
+# credit either way.
+_GENERIC_ENSEMBLE_RE = re.compile(
+    r"^(and\s+)?(his|her|their|the)\s+"
+    r"(orchestra|band|trio|combo|quartet|quintet|ensemble|singers|choir|chorus)"
+    r"(\s+and\s+chorus)?$",
+    re.IGNORECASE,
+)
+
 
 def split_performers(raw: str):
     """Parse a messy Billboard performer credit string into individual artist names."""
@@ -145,7 +160,11 @@ def split_performers(raw: str):
             for token, name in placeholders.items():
                 part = part.replace(token, name)
         part = part.strip(" \"'")
-        if part and part.lower() not in seen:
+        if not part:
+            continue
+        if _GENERIC_ENSEMBLE_RE.match(part):
+            continue
+        if part.lower() not in seen:
             seen.add(part.lower())
             result.append(part)
     return result
