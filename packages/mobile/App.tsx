@@ -15,6 +15,7 @@ import { BoardGrid } from "./src/components/BoardGrid";
 import { Rack } from "./src/components/Rack";
 import { TileInfoModal } from "./src/components/TileInfoModal";
 import { ConnectionsListModal } from "./src/components/ConnectionsListModal";
+import { GameOverModal } from "./src/components/GameOverModal";
 
 const LEVEL_NAMES = [
   "THE COLLABORATIVE WEB",
@@ -84,11 +85,8 @@ export default function App() {
     const breakdown = result.tileValue > 0 ? ` (${result.connectionScore} conn + ${result.tileValue} tile)` : "";
     const multiplier = result.multiplierApplied ? ` [${result.multiplierApplied}]` : "";
     showToast(`+${result.finalScore} pts${breakdown}${multiplier}`);
-    if (result.status === "won") {
-      setTimeout(() => showToast("LEVEL COMPLETE! Connected to END ANCHOR 🎉"), 400);
-    } else if (result.status === "stuck") {
-      setTimeout(() => showToast("No legal moves left — game over.", true), 400);
-    }
+    // Terminal states (bridged/stuck) are announced via GameOverModal, driven
+    // directly off gameState.status below - no toast needed for those.
   }
 
   function handleShuffle() {
@@ -109,8 +107,8 @@ export default function App() {
     showToast("No legal moves in the current rack — try Shuffle.", true);
   }
 
-  function handleRestart(sameLevel: boolean) {
-    const next = sameLevel ? levelNumber : levelNumber + 1;
+  function handleRestart() {
+    const next = levelNumber + 1;
     setLevelNumber(next);
     engineRef.current = newEngine(next);
     setSelectedIndex(null);
@@ -165,26 +163,6 @@ export default function App() {
           onShuffle={handleShuffle}
           onHint={handleHint}
         />
-
-        {gameState.status === "won" && (
-          <View style={styles.endPanel}>
-            <Text style={styles.endTitleWon}>🎉 LEVEL COMPLETE</Text>
-            <Pressable style={styles.newGameButton} onPress={() => handleRestart(false)}>
-              <Text style={styles.newGameText}>NEXT LEVEL →</Text>
-            </Pressable>
-          </View>
-        )}
-        {gameState.status === "stuck" && (
-          <View style={styles.endPanel}>
-            <Text style={styles.endTitleStuck}>GAME OVER — No Moves Left</Text>
-            <Pressable
-              style={[styles.newGameButton, styles.retryButton]}
-              onPress={() => handleRestart(true)}
-            >
-              <Text style={styles.newGameText}>TRY AGAIN ↻</Text>
-            </Pressable>
-          </View>
-        )}
       </ScrollView>
 
       <TileInfoModal cell={infoCell} dataset={dataset} onClose={() => setInfoCell(null)} />
@@ -192,6 +170,12 @@ export default function App() {
         visible={showConnections}
         connections={connections}
         onClose={() => setShowConnections(false)}
+      />
+      <GameOverModal
+        status={gameState.status}
+        penaltyApplied={gameState.penaltyApplied}
+        rackSize={gameState.rack.length}
+        onRestart={handleRestart}
       />
     </View>
   );
@@ -266,36 +250,5 @@ const styles = StyleSheet.create({
   },
   toastError: {
     color: colors.illegal,
-  },
-  endPanel: {
-    alignItems: "center",
-    marginTop: 8,
-  },
-  endTitleWon: {
-    color: colors.year,
-    fontWeight: "800",
-    fontSize: 15,
-    letterSpacing: 0.5,
-  },
-  endTitleStuck: {
-    color: colors.illegal,
-    fontWeight: "800",
-    fontSize: 15,
-    letterSpacing: 0.5,
-  },
-  newGameButton: {
-    marginTop: 16,
-    backgroundColor: colors.artist,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  retryButton: {
-    backgroundColor: colors.illegal,
-  },
-  newGameText: {
-    color: "#fff",
-    fontWeight: "800",
-    letterSpacing: 1,
   },
 });

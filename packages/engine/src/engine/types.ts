@@ -48,12 +48,17 @@ export interface Cell {
 export type Board = Cell[][]; // board[row][col]
 
 /**
- * "playing" until either the game is won (STARTER connected to END_ANCHOR
- * by a chain of matching tiles) or stuck (no rack tile has any legal
- * placement left). Both are terminal - once set, no further placements
- * are accepted.
+ * "playing" until the game ends, which happens one of two ways - both are
+ * penalties, there is no "win":
+ *  - "bridged": STARTER and END_ANCHOR become joined by a path of merely
+ *    touching (adjacent) placed tiles, whether or not they score anything
+ *    together.
+ *  - "stuck": no rack tile has any legal placement left.
+ * Both are terminal - once set, no further placements are accepted, and
+ * the player loses points equal to the value of every tile still in their
+ * rack (see GameState.penaltyApplied).
  */
-export type GameStatus = "playing" | "won" | "stuck";
+export type GameStatus = "playing" | "bridged" | "stuck";
 
 export type ConnectionReason = "YEAR" | "PEAK" | "COLLAB" | "WILDCARD";
 

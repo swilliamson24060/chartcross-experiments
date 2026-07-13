@@ -2,11 +2,11 @@ import { loadLocalDataset } from "../loadLocalDataset";
 import { createEmptyBoard, placeStarterAndAnchor, tileMatchesMultiplierType } from "../board";
 import { GRID_SIZE } from "../types";
 import { bestConnectionReason, connectionPoints } from "../moves";
-import { isStarterConnectedToAnchor } from "../graph";
+import { isStarterPathConnectedToAnchor } from "../graph";
 import { GameEngine } from "../engine";
 import { decadePoints, tileValue } from "../tileValue";
 import { getAllConnections } from "../connections";
-import { ArtistTile, SongTile, Dataset, WildcardTile } from "../types";
+import { ArtistTile, SongTile, Dataset, MoveResult, WildcardTile } from "../types";
 
 let failures = 0;
 function check(label: string, condition: boolean) {
@@ -67,7 +67,7 @@ console.log("Mockup scenario checks:");
   );
 }
 
-console.log("\nBoard + adjacency + win-check:");
+console.log("\nBoard + adjacency + bridge-check:");
 {
   const board = createEmptyBoard();
   const starter = findArtist(dataset, "Lady Gaga");
@@ -76,13 +76,13 @@ console.log("\nBoard + adjacency + win-check:");
 
   check("Starter placed bottom-left", board[GRID_SIZE - 1][0].tile?.id === starter.id);
   check("Anchor placed top-right", board[0][GRID_SIZE - 1].tile?.id === anchor.id);
-  check("Not yet connected", !isStarterConnectedToAnchor(board));
+  check("Not yet bridged", !isStarterPathConnectedToAnchor(board));
 
   // Hand-build a straight adjacent chain across row GRID_SIZE-1 upward to
-  // prove connectivity works once matching tiles bridge starter -> anchor.
+  // prove the pure-adjacency bridge check works (still short of the anchor).
   const dieWithASmile = findSong(dataset, "Die With A Smile", "Lady Gaga");
   board[GRID_SIZE - 1][1].tile = dieWithASmile; // adjacent to starter, COLLAB match
-  check("Still not connected (chain incomplete)", !isStarterConnectedToAnchor(board));
+  check("Still not bridged (chain incomplete)", !isStarterPathConnectedToAnchor(board));
 
   // Directly wire a matching path up to the anchor's row/col to validate BFS,
   // using Bruno Mars (co-credited on Die With A Smile) then a song/artist
@@ -106,6 +106,32 @@ console.log("\nBoard + adjacency + win-check:");
     tileIds.has(starter.id) && tileIds.has(dieWithASmile.id) && tileIds.has(brunoMars.id),
   );
   check("Amy Winehouse (isolated anchor) has no connections yet", !tileIds.has(anchor.id));
+
+  // Carve a full path of *unrelated* tiles from STARTER to END_ANCHOR - none
+  // of them match their neighbors on year/peak/collab, only touch. This is
+  // the exact scenario the bridge rule targets: "even if there are no
+  // connections between some of the tiles."
+  const pathBoard = createEmptyBoard();
+  placeStarterAndAnchor(pathBoard, starter, anchor);
+  const filler = dataset.songs
+    .filter((s) => s.id !== dieWithASmile.id)
+    .slice(0, GRID_SIZE - 2 + GRID_SIZE - 1); // enough unrelated songs to fill an L-shaped path
+  let fillerIdx = 0;
+  for (let row = GRID_SIZE - 2; row >= 0; row--) {
+    pathBoard[row][0].tile = filler[fillerIdx++];
+  }
+  for (let col = 1; col < GRID_SIZE - 1; col++) {
+    pathBoard[0][col].tile = filler[fillerIdx++];
+  }
+  check(
+    "Unrelated, non-matching tiles still bridge STARTER to END_ANCHOR by touching alone",
+    isStarterPathConnectedToAnchor(pathBoard),
+  );
+  const pathConnections = getAllConnections(pathBoard);
+  check(
+    "...even though most of those adjacent pairs score no scoring connection at all",
+    pathConnections.length < filler.length,
+  );
 }
 
 console.log("\nGameEngine integration:");
@@ -254,19 +280,22 @@ console.log("\nTile value wired into engine scoring:");
 
 console.log("\nGame-ending status checks:");
 {
-  let wonCount = 0;
+  let bridgedCount = 0;
   let stuckCount = 0;
 
   for (let seed = 0; seed < 15; seed++) {
     const engine = new GameEngine(dataset, 3, seed);
     let guard = 0;
+    let lastResult: MoveResult | null = null;
+    let scoreBeforeLastMove = engine.getState().score;
     while (engine.getState().status === "playing" && guard++ < 200) {
       const rack = engine.getState().rack;
       let played = false;
       for (let i = 0; i < rack.length; i++) {
         const moves = engine.legalMovesForRackTile(i);
         if (moves.length > 0) {
-          engine.placeTile(i, moves[0].row, moves[0].col);
+          scoreBeforeLastMove = engine.getState().score;
+          lastResult = engine.placeTile(i, moves[0].row, moves[0].col);
           played = true;
           break;
         }
@@ -275,30 +304,40 @@ console.log("\nGame-ending status checks:");
     }
 
     const finalState = engine.getState();
-    if (finalState.status === "won") {
-      wonCount++;
+    const expectedPenalty = finalState.rack.reduce((sum, t) => sum + tileValue(t), 0);
+
+    if (finalState.status === "bridged" || finalState.status === "stuck") {
+      const label = finalState.status;
+      if (label === "bridged") {
+        bridgedCount++;
+        check(
+          `Seed ${seed}: bridged status matches pure-adjacency connectivity`,
+          isStarterPathConnectedToAnchor(finalState.board),
+        );
+      } else {
+        stuckCount++;
+        check(`Seed ${seed}: stuck status matches hasAnyLegalMove()`, !engine.hasAnyLegalMove());
+      }
       check(
-        `Seed ${seed}: won status matches board connectivity`,
-        isStarterConnectedToAnchor(finalState.board),
+        `Seed ${seed}: penaltyApplied equals the tile value of everything left in the rack`,
+        finalState.penaltyApplied === expectedPenalty,
       );
+      if (lastResult) {
+        check(
+          `Seed ${seed}: final score reflects the last move's points minus the penalty`,
+          finalState.score === scoreBeforeLastMove + lastResult.finalScore - finalState.penaltyApplied,
+        );
+      }
       const blocked = engine.placeTile(0, 0, 0);
       check(
-        `Seed ${seed}: further placement rejected after winning`,
-        blocked.legal === false && blocked.status === "won",
-      );
-    } else if (finalState.status === "stuck") {
-      stuckCount++;
-      check(`Seed ${seed}: stuck status matches hasAnyLegalMove()`, !engine.hasAnyLegalMove());
-      const blocked = engine.placeTile(0, 0, 0);
-      check(
-        `Seed ${seed}: further placement rejected while stuck`,
-        blocked.legal === false && blocked.status === "stuck",
+        `Seed ${seed}: further placement rejected once ${label}`,
+        blocked.legal === false && blocked.status === label,
       );
     }
   }
 
-  console.log(`  (info) of 15 seeds: ${wonCount} won, ${stuckCount} stuck, ${15 - wonCount - stuckCount} still playing after 200 moves`);
-  check("At least one game reached a terminal state across 15 seeds", wonCount + stuckCount > 0);
+  console.log(`  (info) of 15 seeds: ${bridgedCount} bridged, ${stuckCount} stuck, ${15 - bridgedCount - stuckCount} still playing after 200 moves`);
+  check("At least one game reached a terminal state across 15 seeds", bridgedCount + stuckCount > 0);
 }
 
 console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);

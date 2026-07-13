@@ -1,15 +1,15 @@
-import { adjacentCells } from "./board";
-import { bestConnectionReason } from "./moves";
+import { adjacentCells, END_ANCHOR_POS, STARTER_POS } from "./board";
 import { Board } from "./types";
-import { END_ANCHOR_POS, STARTER_POS } from "./board";
 
 /**
  * True once STARTER and END_ANCHOR are joined by a path of placed tiles
- * where every step in the path is itself a legally-matching (adjacent +
- * year/peak/collab) edge. Plain physical adjacency of two placed tiles
- * that don't match anything is not a graph edge.
+ * that are simply orthogonally adjacent to one another - no year/peak/
+ * collab match is required between any pair along the path. This is
+ * deliberately more permissive than the scoring connections shown in the
+ * connections list: two tiles can "touch" and bridge the path even if
+ * they don't score anything together.
  */
-export function isStarterConnectedToAnchor(board: Board): boolean {
+export function isStarterPathConnectedToAnchor(board: Board): boolean {
   const startCell = board[STARTER_POS.row][STARTER_POS.col];
   if (!startCell.tile) return false;
 
@@ -24,8 +24,7 @@ export function isStarterConnectedToAnchor(board: Board): boolean {
     }
     for (const neighbor of adjacentCells(board, current.row, current.col)) {
       const key = `${neighbor.row},${neighbor.col}`;
-      if (visited.has(key) || !neighbor.tile || !current.tile) continue;
-      if (bestConnectionReason(current.tile, neighbor.tile) === null) continue;
+      if (visited.has(key) || !neighbor.tile) continue;
       visited.add(key);
       stack.push(neighbor);
     }

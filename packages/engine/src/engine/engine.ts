@@ -9,7 +9,7 @@ import {
   tileMatchesMultiplierType,
 } from "./board";
 import { buildDataIndex, DataIndex, findCandidatesFor } from "./dataIndex";
-import { isStarterConnectedToAnchor } from "./graph";
+import { isStarterPathConnectedToAnchor } from "./graph";
 import { bestConnectionReason, connectionPoints } from "./moves";
 import { createRng, pickRandom, randomInt } from "./rng";
 import { tileValue } from "./tileValue";
@@ -25,6 +25,8 @@ export interface GameState {
   score: number;
   status: GameStatus;
   levelNumber: number;
+  /** Points deducted from the score when the game ended; 0 while playing. */
+  penaltyApplied: number;
 }
 
 export class GameEngine {
@@ -36,6 +38,7 @@ export class GameEngine {
   private usedIds = new Set<string>();
   private score = 0;
   private status: GameStatus = "playing";
+  private penaltyApplied = 0;
   private levelNumber: number;
   private wildcardCounter = 0;
 
@@ -58,24 +61,36 @@ export class GameEngine {
       const tile = this.drawTile();
       if (tile) this.rack.push(tile);
     }
-    this.ensurePlayableRack();
     this.updateStatus();
   }
 
   /**
-   * Both end states are monotonic - a connected STARTER/END_ANCHOR stays
-   * connected (tiles are never removed), and once no rack tile has a legal
-   * move, placeTile() rejects further attempts so the rack can't change
-   * again - so this can simply be recomputed from scratch each time.
+   * Checks for the two ways a game can end. "Bridged" is a pure board
+   * condition (tiles are never removed, so once true it stays true) and is
+   * checked first - if the board is already bridged there's no point
+   * trying to rescue the rack. Otherwise we make a best effort to keep the
+   * rack playable via ensurePlayableRack() before accepting "stuck".
+   *
+   * No-ops once the game is already over: both end states are terminal, so
+   * this should only ever actually transition status once per game.
    */
   private updateStatus(): void {
-    if (isStarterConnectedToAnchor(this.board)) {
-      this.status = "won";
-    } else if (!this.hasAnyLegalMove()) {
-      this.status = "stuck";
-    } else {
-      this.status = "playing";
+    if (this.status !== "playing") return;
+    if (isStarterPathConnectedToAnchor(this.board)) {
+      this.endGame("bridged");
+      return;
     }
+    this.ensurePlayableRack();
+    if (!this.hasAnyLegalMove()) {
+      this.endGame("stuck");
+    }
+  }
+
+  /** Ends the game and docks the score by the value of every tile left in the rack. */
+  private endGame(status: "bridged" | "stuck"): void {
+    this.status = status;
+    this.penaltyApplied = this.rack.reduce((sum, t) => sum + tileValue(t), 0);
+    this.score -= this.penaltyApplied;
   }
 
   /**
@@ -160,6 +175,7 @@ export class GameEngine {
       score: this.score,
       status: this.status,
       levelNumber: this.levelNumber,
+      penaltyApplied: this.penaltyApplied,
     };
   }
 
@@ -230,8 +246,8 @@ export class GameEngine {
 
     if (this.status !== "playing") {
       return illegal(
-        this.status === "won"
-          ? "Game over — STARTER is already connected to END_ANCHOR."
+        this.status === "bridged"
+          ? "Game over — STARTER and END_ANCHOR are bridged by a path of touching tiles."
           : "Game over — no legal moves remain.",
       );
     }
@@ -258,7 +274,6 @@ export class GameEngine {
     this.rack.splice(tileIndex, 1);
     const refill = this.drawTile();
     if (refill) this.rack.push(refill);
-    this.ensurePlayableRack();
 
     this.score += finalScore;
     this.updateStatus();
