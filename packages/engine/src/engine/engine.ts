@@ -193,12 +193,21 @@ export class GameEngine {
     return result;
   }
 
-  private createWildcardTile(): WildcardTile {
-    return { kind: "WILDCARD", id: `wild-${this.wildcardCounter++}` };
+  /**
+   * The link coords are optional only so bare test/preview objects can omit
+   * them - every real gap-fill placement always passes the two cells it
+   * links, since getAllConnections() reads them directly rather than
+   * inferring from adjacency (see WildcardTile.contentRow).
+   */
+  private createWildcardTile(link?: { contentRow: number; contentCol: number; anchorRow: number; anchorCol: number }): WildcardTile {
+    return { kind: "WILDCARD", id: `wild-${this.wildcardCounter++}`, ...link };
   }
 
-  private createConnectorTile(connectionType: ConnectionCategory): ConnectorTile {
-    return { kind: "CONNECTOR", id: `connector-${this.connectorCounter++}`, connectionType };
+  private createConnectorTile(
+    connectionType: ConnectionCategory,
+    link: { contentRow: number; contentCol: number; anchorRow: number; anchorCol: number },
+  ): ConnectorTile {
+    return { kind: "CONNECTOR", id: `connector-${this.connectorCounter++}`, connectionType, ...link };
   }
 
   /**
@@ -435,7 +444,12 @@ export class GameEngine {
     const { connectionScore, tileValue: value, finalScore, multiplierApplied, multiplierMissed } =
       this.scoreForEdge(tile, contentCell, points);
 
-    gapCell.tile = this.createConnectorTile(required);
+    gapCell.tile = this.createConnectorTile(required, {
+      contentRow: pending.contentRow,
+      contentCol: pending.contentCol,
+      anchorRow: pending.anchorRow,
+      anchorCol: pending.anchorCol,
+    });
     relocateMultiplier(this.board, this.rng, gapCell);
     this.score += finalScore;
     this.pendingConnector = null;
@@ -498,7 +512,12 @@ export class GameEngine {
     const tile = contentCell.tile!;
     const { connectionScore, tileValue: value, finalScore } = this.scoreForEdge(tile, contentCell, 0);
 
-    gapCell.tile = this.createWildcardTile();
+    gapCell.tile = this.createWildcardTile({
+      contentRow: pending.contentRow,
+      contentCol: pending.contentCol,
+      anchorRow: pending.anchorRow,
+      anchorCol: pending.anchorCol,
+    });
     relocateMultiplier(this.board, this.rng, gapCell);
     this.wildcardConnectors--;
     this.score += finalScore;
@@ -582,7 +601,12 @@ export class GameEngine {
       return illegal("That cell must be empty, next to a placed tile, with empty space on the far side.");
     }
 
-    pairing.gap.tile = this.createWildcardTile();
+    pairing.gap.tile = this.createWildcardTile({
+      contentRow: pairing.content.row,
+      contentCol: pairing.content.col,
+      anchorRow: pairing.anchor.row,
+      anchorCol: pairing.anchor.col,
+    });
     relocateMultiplier(this.board, this.rng, pairing.gap);
     this.wildcardConnectors--;
     this.pendingWildRescue = {

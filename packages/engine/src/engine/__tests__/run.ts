@@ -204,7 +204,23 @@ console.log("\ngetAllConnections reads placed connector tiles:");
     bestConnectionReason(starter, brunoMars) === "COLLAB",
   );
   board[GRID_SIZE - 1][2].tile = brunoMars; // anchor, 2 cells right of STARTER
-  board[GRID_SIZE - 1][1].tile = { kind: "CONNECTOR", id: "test-connector", connectionType: "COLLAB" };
+  board[GRID_SIZE - 1][1].tile = {
+    kind: "CONNECTOR",
+    id: "test-connector",
+    connectionType: "COLLAB",
+    contentRow: GRID_SIZE - 1,
+    contentCol: 0,
+    anchorRow: GRID_SIZE - 1,
+    anchorCol: 2,
+  };
+
+  // A third, unrelated tile also touching the connector cell (e.g. placed
+  // by a completely different move later in the game) must not confuse
+  // which pair the connector actually links - this is exactly the bug
+  // where a crowded board could report the wrong two tiles for a
+  // correctly-validated connection.
+  const unrelated = findArtist(dataset, "Dolly Parton");
+  board[GRID_SIZE - 2][1].tile = unrelated;
 
   const connections = getAllConnections(board);
   check("getAllConnections finds exactly the one connector-linked pair", connections.length === 1);
@@ -213,6 +229,10 @@ console.log("\ngetAllConnections reads placed connector tiles:");
   const tileIds = connections.length
     ? new Set([connections[0].tileA.id, connections[0].tileB.id])
     : new Set<string>();
+  check(
+    "The crowding third tile is not mistaken for one side of the connection",
+    !tileIds.has(unrelated.id),
+  );
   check(
     "The connection references STARTER and Bruno Mars, not the connector itself",
     tileIds.has(starter.id) && tileIds.has(brunoMars.id) && !tileIds.has("test-connector"),
