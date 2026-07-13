@@ -1,5 +1,5 @@
 import { loadLocalDataset } from "../loadLocalDataset";
-import { createEmptyBoard, placeStarterAndAnchor, tileMatchesMultiplierType } from "../board";
+import { createEmptyBoard, placeStarterAndAnchor, relocateMultiplier, tileMatchesMultiplierType } from "../board";
 import { GRID_SIZE } from "../types";
 import { bestConnectionReason, connectionPoints } from "../moves";
 import { isStarterPathConnectedToAnchor } from "../graph";
@@ -306,36 +306,140 @@ console.log("\nWildcard tile checks:");
     !tileMatchesMultiplierType(wildcard, "CHART_BOOST"),
   );
 
-  // Find a seed whose starting rack actually contains a wildcard, then
-  // play it end-to-end through the real engine to prove the full path
-  // (draw -> legal move enumeration -> placement -> free auto-bridge)
-  // works without ever requiring a connector guess.
-  let wildcardEngine: GameEngine | null = null;
-  let wildcardIndex = -1;
-  for (let seed = 0; seed < 2000 && !wildcardEngine; seed++) {
+  // Wildcards are only ever obtainable via buyWildcard() now - never drawn
+  // into the rack as a placeable content tile.
+  let sawWildcardInRack = false;
+  for (let seed = 0; seed < 500; seed++) {
     const candidate = new GameEngine(dataset, 1, seed);
-    const idx = candidate.getState().rack.findIndex((t) => t.kind === "WILDCARD");
-    if (idx !== -1) {
-      wildcardEngine = candidate;
-      wildcardIndex = idx;
+    if (candidate.getState().rack.some((t) => t.kind === "WILDCARD")) {
+      sawWildcardInRack = true;
+      break;
+    }
+  }
+  check("No wildcard ever appears in a starting rack across 500 seeds", !sawWildcardInRack);
+
+  // Buy a wild connector, get into a pending guess, and spend it instead of
+  // guessing - it should always succeed, score 0 connection points, and
+  // fill the gap with a wildcard tile.
+  const engine = new GameEngine(dataset, 47, 555);
+  let guard = 0;
+  while (engine.getState().score < WILD_TILE_COST && engine.getState().status === "playing" && guard++ < 200) {
+    const rack = engine.getState().rack;
+    for (let i = 0; i < rack.length; i++) {
+      const moves = engine.legalMovesForRackTile(i);
+      if (moves.length > 0) {
+        resolveMove(engine, i, moves[0]);
+        break;
+      }
     }
   }
 
-  if (wildcardEngine && wildcardIndex !== -1) {
-    const moves = wildcardEngine.legalMovesForRackTile(wildcardIndex);
-    check("A wildcard in the starting rack has legal moves", moves.length > 0);
-    if (moves.length > 0) {
-      const result = wildcardEngine.placeTile(wildcardIndex, moves[0].row, moves[0].col);
-      check("Placing a wildcard is legal", result.legal === true);
-      check("Placing a wildcard resolves immediately - no connector needed", result.resolved === true);
-      check("No connector is left pending after a wildcard placement", wildcardEngine.getState().pendingConnector === null);
-      check("Placing a wildcard scores exactly 0", result.finalScore === 0);
-      check("The wildcard placement's edge is WILDCARD-reasoned", result.edge?.reason === "WILDCARD");
-      check("Rack refills immediately after a wildcard placement", wildcardEngine.getState().rack.length === 5);
+  if (engine.getState().status === "playing" && engine.getState().score >= WILD_TILE_COST) {
+    const purchase = engine.buyWildcard();
+    check("Buying a wild connector succeeds when affordable", purchase.success === true);
+    check("wildcardConnectors increments by one", engine.getState().wildcardConnectors === 1);
+    check("Rack size is unaffected by buying a wild connector", engine.getState().rack.length === 5);
+
+    const rack = engine.getState().rack;
+    let placed = false;
+    for (let i = 0; i < rack.length && !placed; i++) {
+      const moves = engine.legalMovesForRackTile(i);
+      if (moves.length === 0) continue;
+      const placeResult = engine.placeTile(i, moves[0].row, moves[0].col);
+      if (!placeResult.legal || placeResult.resolved || !placeResult.pendingConnector) continue; // only care about a real pending guess
+      placed = true;
+      const { gapRow, gapCol } = placeResult.pendingConnector;
+
+      const scoreBefore = engine.getState().score;
+      const wildResult = engine.useWildcardConnector();
+      check("useWildcardConnector succeeds when a connector is pending and charges are available", wildResult.legal === true);
+      check("useWildcardConnector is always reported as correct", wildResult.correct === true);
+      check("useWildcardConnector scores 0 connection points", wildResult.connectionScore === 0);
+      check("useWildcardConnector still awards the tile's own value", wildResult.finalScore === wildResult.tileValue);
+      check(
+        "Score increases by exactly the wild connector's finalScore",
+        engine.getState().score === scoreBefore + wildResult.finalScore,
+      );
+      check("wildcardConnectors decrements back to 0", engine.getState().wildcardConnectors === 0);
+      check("pendingConnector clears after using a wild connector", engine.getState().pendingConnector === null);
+      check(
+        "The gap cell is filled with a WILDCARD-kind tile",
+        engine.getState().board[gapRow][gapCol].tile?.kind === "WILDCARD",
+      );
+
+      const again = engine.useWildcardConnector();
+      check("useWildcardConnector fails once out of charges", again.legal === false);
     }
+    check("Found a real (non-wildcard) pending connector to spend the charge on", placed);
   } else {
-    check("Found a seed with a wildcard in the starting rack within 2000 tries", false);
+    check("Reached enough score to buy a wild connector within 200 moves", false);
   }
+}
+
+console.log("\nMultiplier relocation checks:");
+{
+  // A connector/wild tile can never benefit from a multiplier, so
+  // relocateMultiplier() should move the bonus elsewhere rather than waste
+  // it whenever a connector fills a cell that had one.
+  const board = createEmptyBoard();
+  const starter = findArtist(dataset, "Lady Gaga");
+  const anchor = findArtist(dataset, "Amy Winehouse");
+  placeStarterAndAnchor(board, starter, anchor);
+  const cell = board[3][3];
+  cell.multiplier = "3X_SONG";
+
+  const rng = () => 0; // deterministic - always picks the first eligible cell
+  relocateMultiplier(board, rng, cell);
+  check("The original cell's multiplier is cleared", cell.multiplier === undefined);
+  const relocated = board.some(
+    (row) => row.some((c) => c !== cell && c.multiplier === "3X_SONG"),
+  );
+  check("The multiplier reappears on exactly one other cell", relocated);
+  const totalMultiplierCells = board.flat().filter((c) => c.multiplier).length;
+  check("Exactly one cell on the board still has a multiplier", totalMultiplierCells === 1);
+
+  const untouched = createEmptyBoard();
+  placeStarterAndAnchor(untouched, starter, anchor);
+  relocateMultiplier(untouched, rng, untouched[2][2]);
+  check("Relocating a cell with no multiplier is a no-op", untouched.flat().every((c) => !c.multiplier));
+
+  // End-to-end through the real engine: force a multiplier onto the gap
+  // cell of an in-progress pending connector, resolve it, and confirm the
+  // bonus moved rather than vanished.
+  let relocationTested = false;
+  for (let seed = 0; seed < 50 && !relocationTested; seed++) {
+    const attempt = new GameEngine(dataset, 48, seed);
+    const rack = attempt.getState().rack;
+    for (let i = 0; i < rack.length && !relocationTested; i++) {
+      const moves = attempt.legalMovesForRackTile(i);
+      if (moves.length === 0) continue;
+      const move = moves[0];
+      const placeResult = attempt.placeTile(i, move.row, move.col);
+      if (!placeResult.legal || placeResult.resolved || !placeResult.pendingConnector) continue;
+
+      const { gapRow, gapCol, contentRow, contentCol } = placeResult.pendingConnector;
+      const gapCellBefore = attempt.getState().board[gapRow][gapCol];
+      // Force a multiplier onto the gap cell directly to exercise the path
+      // deterministically, regardless of what scatterMultipliers rolled.
+      gapCellBefore.multiplier = "CHART_BOOST";
+      const before = attempt.getState().board.flat().filter((c) => c.multiplier).length;
+
+      const required = move.edges[0].reason as ConnectionCategory;
+      const connResult = attempt.placeConnector(required);
+      relocationTested = true;
+
+      check("The resolved connector placement was legal and correct", connResult.legal && connResult.correct);
+      const gapCellAfter = attempt.getState().board[gapRow][gapCol];
+      check("The gap cell no longer carries the multiplier once occupied", gapCellAfter.multiplier === undefined);
+      const after = attempt.getState().board.flat().filter((c) => c.multiplier).length;
+      check("The total number of multiplier cells on the board is unchanged", after === before);
+      check(
+        "The content tile's own cell is untouched by relocation",
+        attempt.getState().board[contentRow][contentCol].tile !== undefined,
+      );
+    }
+  }
+  check("Found a real pending connector to verify multiplier relocation end-to-end", relocationTested);
 }
 
 console.log("\nTile value (decade points) checks:");
@@ -501,33 +605,14 @@ console.log("\nBuy wildcard checks:");
   if (engine.getState().status === "playing" && engine.getState().score >= WILD_TILE_COST) {
     const scoreBefore = engine.getState().score;
     const rackSizeBefore = engine.getState().rack.length;
+    const wildcardsBefore = engine.getState().wildcardConnectors;
     const result = engine.buyWildcard();
     check("Purchase succeeds when affordable", result.success === true);
     check("Purchase costs exactly WILD_TILE_COST", result.cost === WILD_TILE_COST);
     check("Score drops by exactly WILD_TILE_COST", engine.getState().score === scoreBefore - WILD_TILE_COST);
     check("scoreAfter matches the new score", result.scoreAfter === engine.getState().score);
-    check("Rack grows by exactly one tile", engine.getState().rack.length === rackSizeBefore + 1);
-    check(
-      "The newly added tile is a wildcard",
-      engine.getState().rack[engine.getState().rack.length - 1].kind === "WILDCARD",
-    );
-
-    // Play any one tile down and confirm the rack settles back to RACK_SIZE
-    // (5) instead of ballooning further.
-    const rack = engine.getState().rack;
-    let settled = false;
-    for (let i = 0; i < rack.length; i++) {
-      const moves = engine.legalMovesForRackTile(i);
-      if (moves.length > 0) {
-        resolveMove(engine, i, moves[0]);
-        settled = true;
-        break;
-      }
-    }
-    check("Found a move to confirm the rack settles back down", settled);
-    if (settled) {
-      check("Rack settles back to 5 after playing a tile post-purchase", engine.getState().rack.length === 5);
-    }
+    check("Rack size is unaffected by a purchase", engine.getState().rack.length === rackSizeBefore);
+    check("wildcardConnectors increments by exactly one", engine.getState().wildcardConnectors === wildcardsBefore + 1);
   } else {
     check("Reached enough score to test a successful purchase within 200 moves", false);
   }

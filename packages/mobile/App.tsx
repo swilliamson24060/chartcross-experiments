@@ -163,14 +163,28 @@ export default function App() {
   }
 
   function handleBuyWild() {
-    if (gameState.status !== "playing" || pendingConnector) return;
+    // Unlike other tools, buying a wild connector doesn't touch the rack or
+    // board, so it stays available even mid-guess - useful to bail out of a
+    // pending connector you can't figure out.
+    if (gameState.status !== "playing") return;
     const result = engineRef.current.buyWildcard();
     if (!result.success) {
-      showToast(result.reason ?? "Can't buy a wild tile right now.", true);
+      showToast(result.reason ?? "Can't buy a wild connector right now.", true);
       return;
     }
     refresh();
-    showToast(`Bought a ★ Wild tile for ${result.cost} pts`);
+    showToast(`Bought a ★ Wild connector for ${result.cost} pts`);
+  }
+
+  function handleUseWildcard() {
+    if (!pendingConnector) return;
+    const result = engineRef.current.useWildcardConnector();
+    refresh();
+    if (!result.legal) {
+      showToast(result.reason ?? "Can't use a wild connector right now.", true);
+      return;
+    }
+    showScoreToast(result);
   }
 
   function handleRestart() {
@@ -183,7 +197,7 @@ export default function App() {
   }
 
   const levelName = LEVEL_NAMES[(levelNumber - 1) % LEVEL_NAMES.length];
-  const canBuyWild = gameState.status === "playing" && gameState.score >= WILD_TILE_COST && !pendingConnector;
+  const canBuyWild = gameState.status === "playing" && gameState.score >= WILD_TILE_COST;
 
   return (
     <View style={styles.app}>
@@ -246,7 +260,12 @@ export default function App() {
         </View>
 
         <View style={styles.connectorSlot}>
-          <ConnectorPicker active={!!pendingConnector} onGuess={handleConnectorGuess} />
+          <ConnectorPicker
+            active={!!pendingConnector}
+            onGuess={handleConnectorGuess}
+            wildcardCount={gameState.wildcardConnectors}
+            onUseWildcard={handleUseWildcard}
+          />
         </View>
 
         <Rack

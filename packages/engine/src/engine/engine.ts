@@ -6,6 +6,7 @@ import {
   multiplierFactor,
   pickTwoDistinctArtists,
   placeStarterAndAnchor,
+  relocateMultiplier,
   scatterMultipliers,
   tileMatchesMultiplierType,
 } from "./board";
@@ -36,7 +37,6 @@ import {
 
 const RACK_SIZE = 5;
 const CONNECTABLE_DRAW_BIAS = 0.8; // probability a refill favors a connectable tile
-const WILDCARD_DRAW_CHANCE = 0.06; // probability a refill is a wildcard instead of a real tile
 
 export interface GameState {
   board: Board;
@@ -48,6 +48,8 @@ export interface GameState {
   penaltyApplied: number;
   /** Set while a placed tile is waiting on a connector guess via placeConnector(). */
   pendingConnector: PendingConnector | null;
+  /** Wild connector charges bought via buyWildcard(), spendable with useWildcardConnector(). */
+  wildcardConnectors: number;
 }
 
 interface BestGapEdge {
@@ -70,6 +72,7 @@ export class GameEngine {
   private levelNumber: number;
   private wildcardCounter = 0;
   private connectorCounter = 0;
+  private wildcardConnectors = 0;
   private pendingConnector: PendingConnector | null = null;
   /** The hidden correct answer for the active pendingConnector; never exposed via getState(). */
   private pendingRequiredReason: ConnectionCategory | null = null;
@@ -184,9 +187,12 @@ export class GameEngine {
     return { kind: "CONNECTOR", id: `connector-${this.connectorCounter++}`, connectionType };
   }
 
+  /**
+   * Wildcards are never drawn - they're only obtainable via buyWildcard()
+   * and only ever usable as a connector (see useWildcardConnector()), not
+   * as a rack tile a player places directly.
+   */
   private drawTile(): Tile | null {
-    if (this.rng() < WILDCARD_DRAW_CHANCE) return this.createWildcardTile();
-
     const useConnectable = this.rng() < CONNECTABLE_DRAW_BIAS;
     if (useConnectable) {
       const candidates = this.connectableCandidates();
@@ -213,14 +219,11 @@ export class GameEngine {
       levelNumber: this.levelNumber,
       penaltyApplied: this.penaltyApplied,
       pendingConnector: this.pendingConnector,
+      wildcardConnectors: this.wildcardConnectors,
     };
   }
 
-  /**
-   * Only top up to RACK_SIZE - a bought wildcard (see buyWildcard()) can
-   * push the rack above RACK_SIZE, and it should settle back down rather
-   * than being refilled again on the next placement.
-   */
+  /** Tops the rack back up to RACK_SIZE after a tile leaves it. */
   private refillRack(): void {
     if (this.rack.length < RACK_SIZE) {
       const refill = this.drawTile();
@@ -338,9 +341,12 @@ export class GameEngine {
     this.rack.splice(tileIndex, 1);
 
     if (best.reason === "WILDCARD") {
-      // Nothing real to guess - bridge the gap for free, same as a
-      // wildcard connecting for zero points under the old adjacency rule.
+      // The anchor is itself a wild connector from an earlier turn - it
+      // stays wild permanently, so this new tile bridges to it for free
+      // with nothing to guess. The fresh gap cell also becomes wild,
+      // letting the chain extend further on future turns.
       best.gap.tile = this.createWildcardTile();
+      relocateMultiplier(this.board, this.rng, best.gap);
       const { connectionScore, tileValue: value, finalScore } = this.scoreForEdge(tile, cell, 0);
       this.refillRack();
       this.score += finalScore;
@@ -429,6 +435,7 @@ export class GameEngine {
       this.scoreForEdge(tile, contentCell, points);
 
     gapCell.tile = this.createConnectorTile(required);
+    relocateMultiplier(this.board, this.rng, gapCell);
     this.score += finalScore;
     this.pendingConnector = null;
     this.pendingRequiredReason = null;
@@ -456,6 +463,68 @@ export class GameEngine {
     };
   }
 
+  /**
+   * Spends one bought wild connector charge to resolve the active
+   * pendingConnector without guessing - always succeeds, but scores the
+   * connection at 0 points (same as any other wildcard connection) since
+   * it's a rescue tool, not a scoring play.
+   */
+  useWildcardConnector(): PlaceConnectorResult {
+    const illegal = (reason: string): PlaceConnectorResult => ({
+      legal: false,
+      reason,
+      correct: false,
+      pointsDelta: 0,
+      connectionScore: 0,
+      tileValue: 0,
+      finalScore: 0,
+      status: this.status,
+    });
+
+    if (this.status !== "playing") {
+      return illegal("Game over — no more moves allowed.");
+    }
+    if (!this.pendingConnector) {
+      return illegal("No connector placement is pending.");
+    }
+    if (this.wildcardConnectors <= 0) {
+      return illegal("No wild connectors available — buy one first.");
+    }
+
+    const pending = this.pendingConnector;
+    const contentCell = this.board[pending.contentRow][pending.contentCol];
+    const gapCell = this.board[pending.gapRow][pending.gapCol];
+    const tile = contentCell.tile!;
+    const { connectionScore, tileValue: value, finalScore } = this.scoreForEdge(tile, contentCell, 0);
+
+    gapCell.tile = this.createWildcardTile();
+    relocateMultiplier(this.board, this.rng, gapCell);
+    this.wildcardConnectors--;
+    this.score += finalScore;
+    this.pendingConnector = null;
+    this.pendingRequiredReason = null;
+    this.refillRack();
+    this.updateStatus();
+
+    return {
+      legal: true,
+      correct: true,
+      pointsDelta: finalScore,
+      edge: {
+        fromRow: pending.contentRow,
+        fromCol: pending.contentCol,
+        toRow: pending.anchorRow,
+        toCol: pending.anchorCol,
+        reason: "WILDCARD",
+        points: 0,
+      },
+      connectionScore,
+      tileValue: value,
+      finalScore,
+      status: this.status,
+    };
+  }
+
   shuffleRack(): void {
     for (let i = this.rack.length - 1; i > 0; i--) {
       const j = randomInt(this.rng, i + 1);
@@ -464,11 +533,9 @@ export class GameEngine {
   }
 
   /**
-   * Spends WILD_TILE_COST points to add a wildcard tile to the rack. This
-   * doesn't discard anything - the rack can temporarily exceed RACK_SIZE,
-   * and settles back down naturally as placeTile() only tops it back up to
-   * RACK_SIZE rather than always adding one. Repeatable as long as the
-   * player can afford it.
+   * Spends WILD_TILE_COST points for one wild connector charge, spendable
+   * via useWildcardConnector() to resolve a pending guess for free.
+   * Repeatable as long as the player can afford it.
    */
   buyWildcard(): PurchaseResult {
     if (this.status !== "playing") {
@@ -477,13 +544,13 @@ export class GameEngine {
     if (this.score < WILD_TILE_COST) {
       return {
         success: false,
-        reason: `Not enough points — buying a wild tile costs ${WILD_TILE_COST}.`,
+        reason: `Not enough points — buying a wild connector costs ${WILD_TILE_COST}.`,
         cost: WILD_TILE_COST,
         scoreAfter: this.score,
       };
     }
     this.score -= WILD_TILE_COST;
-    this.rack.push(this.createWildcardTile());
+    this.wildcardConnectors++;
     return { success: true, cost: WILD_TILE_COST, scoreAfter: this.score };
   }
 }

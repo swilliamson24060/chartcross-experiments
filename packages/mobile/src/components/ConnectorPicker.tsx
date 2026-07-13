@@ -6,6 +6,8 @@ import { colors, connectorDim } from "../theme";
 interface Props {
   active: boolean;
   onGuess: (type: ConnectionCategory) => void;
+  wildcardCount: number;
+  onUseWildcard: () => void;
 }
 
 const LABELS: Record<ConnectionCategory, string> = {
@@ -23,9 +25,12 @@ const ACCENT: Record<ConnectionCategory, string> = {
 /**
  * The three connection-type tiles are always available - not drawn from the
  * rack - so this renders as a permanent, reusable trio rather than a rack
- * slot. Only tappable while a gap placement is waiting on a guess.
+ * slot. Only tappable while a gap placement is waiting on a guess. The wild
+ * connector is a fourth slot alongside them, bought via buyWildcard() -
+ * it's the only role a wildcard can play now, never a placeable rack tile.
  */
-export function ConnectorPicker({ active, onGuess }: Props) {
+export function ConnectorPicker({ active, onGuess, wildcardCount, onUseWildcard }: Props) {
+  const wildcardEnabled = active && wildcardCount > 0;
   return (
     <View>
       <Text style={[styles.label, active && styles.labelActive]}>
@@ -53,6 +58,21 @@ export function ConnectorPicker({ active, onGuess }: Props) {
             </Pressable>
           );
         })}
+        <Pressable
+          disabled={!wildcardEnabled}
+          onPress={onUseWildcard}
+          style={[
+            styles.chip,
+            {
+              borderColor: colors.wildcard,
+              backgroundColor: colors.wildcardDim,
+              opacity: wildcardEnabled ? 1 : 0.4,
+              boxShadow: wildcardEnabled ? `0 0 6px ${colors.wildcard}` : undefined,
+            },
+          ]}
+        >
+          <Text style={[styles.chipText, { color: colors.wildcard }]}>{`★ WILD\n(${wildcardCount})`}</Text>
+        </Pressable>
       </View>
     </View>
   );

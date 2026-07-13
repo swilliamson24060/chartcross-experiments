@@ -134,6 +134,34 @@ export function gapNeighbors(board: Board, row: number, col: number): GapPair[] 
   return result;
 }
 
+/**
+ * Multipliers only ever pay out for a content tile landing on them - a
+ * connector (or wild connector) filling that same cell can never benefit,
+ * so leaving the bonus there would just waste it. Instead it hops to a
+ * fresh eligible cell elsewhere on the board so the player still gets a
+ * shot at it. No-ops if the cell had no multiplier, and simply drops the
+ * bonus if the board is too full to find anywhere to put it (rare).
+ */
+export function relocateMultiplier(board: Board, rng: () => number, cell: Cell): void {
+  const type = cell.multiplier;
+  if (!type) return;
+  cell.multiplier = undefined;
+
+  const eligible: Cell[] = [];
+  for (const row of board) {
+    for (const c of row) {
+      const isStarter = c.row === STARTER_POS.row && c.col === STARTER_POS.col;
+      const isAnchor = c.row === END_ANCHOR_POS.row && c.col === END_ANCHOR_POS.col;
+      if (!isStarter && !isAnchor && !c.tile && !c.multiplier && c !== cell) {
+        eligible.push(c);
+      }
+    }
+  }
+  if (eligible.length === 0) return;
+  const target = eligible[randomInt(rng, eligible.length)];
+  target.multiplier = type;
+}
+
 export function tileMatchesMultiplierType(tile: Tile, type: MultiplierType): boolean {
   if (tile.kind === "WILDCARD" || tile.kind === "CONNECTOR") return false; // no bonus for wildcards or connectors
   if (type === "CHART_BOOST") return true;
