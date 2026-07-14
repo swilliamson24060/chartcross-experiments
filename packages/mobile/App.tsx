@@ -27,6 +27,7 @@ import { ConnectionsListModal } from "./src/components/ConnectionsListModal";
 import { GameOverModal } from "./src/components/GameOverModal";
 import { HowToPlayModal } from "./src/components/HowToPlayModal";
 import { StuckModal } from "./src/components/StuckModal";
+import { LeaderboardModal } from "./src/components/LeaderboardModal";
 
 const LEVEL_NAMES = [
   "THE COLLABORATIVE WEB",
@@ -51,6 +52,8 @@ export default function App() {
   const [infoCell, setInfoCell] = useState<Cell | null>(null);
   const [showConnections, setShowConnections] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(true);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboardRefreshKey, setLeaderboardRefreshKey] = useState(0);
 
   const boardPixelWidth = Math.min(width - 24, 520);
   const cellSize = Math.floor(boardPixelWidth / GRID_SIZE);
@@ -303,7 +306,14 @@ export default function App() {
           </Pressable>
         </View>
         <Text style={styles.title}>CHART CROSS</Text>
-        <View style={styles.headerSpacer}>
+        <View style={[styles.headerSpacer, styles.headerSpacerRight]}>
+          <Pressable
+            style={styles.headerIconButton}
+            onPress={() => setShowLeaderboard(true)}
+            hitSlop={8}
+          >
+            <Text style={styles.headerIconText}>🏆</Text>
+          </Pressable>
           <Pressable
             style={styles.headerIconButton}
             onPress={() => setShowHowToPlay(true)}
@@ -375,6 +385,7 @@ export default function App() {
         rackSize={gameState.rack.length}
         finalScore={gameState.score}
         onRestart={handleRestart}
+        onScoreSubmitted={() => setLeaderboardRefreshKey((k) => k + 1)}
       />
       <StuckModal
         visible={gameState.awaitingStuckDecision}
@@ -384,6 +395,12 @@ export default function App() {
         onEndGame={handleEndStuckGame}
       />
       <HowToPlayModal visible={showHowToPlay} onClose={() => setShowHowToPlay(false)} />
+      <LeaderboardModal
+        visible={showLeaderboard}
+        onClose={() => setShowLeaderboard(false)}
+        refreshKey={leaderboardRefreshKey}
+        highlightScore={gameState.status !== "playing" ? gameState.score : undefined}
+      />
     </View>
   );
 }
@@ -414,6 +431,9 @@ const styles = StyleSheet.create({
   },
   headerSpacerLeft: {
     justifyContent: "flex-start",
+  },
+  headerSpacerRight: {
+    width: 96,
   },
   headerIconButton: {
     padding: 4,
