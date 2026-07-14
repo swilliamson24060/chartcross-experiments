@@ -4,8 +4,13 @@ function tileYears(tile: MatchableTile): number[] {
   return tile.kind === "SONG" ? [tile.peakYear] : tile.years;
 }
 
-function tileDecades(tile: MatchableTile): number[] {
+function tileDecadesRaw(tile: MatchableTile): number[] {
   return tileYears(tile).map((y) => Math.floor(y / 10) * 10);
+}
+
+/** Every decade a tile charted in - a single one for a SONG, one per distinct decade across a career for an ARTIST - deduped and sorted ascending. */
+export function tileDecades(tile: MatchableTile): number[] {
+  return [...new Set(tileDecadesRaw(tile))].sort((a, b) => a - b);
 }
 
 function intersects<T>(a: T[], b: T[]): boolean {

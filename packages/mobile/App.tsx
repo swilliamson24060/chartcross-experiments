@@ -373,7 +373,7 @@ export default function App() {
         />
       </ScrollView>
 
-      <TileInfoModal cell={infoCell} dataset={dataset} onClose={() => setInfoCell(null)} />
+      <TileInfoModal cell={infoCell} dataset={dataset} board={gameState.board} onClose={() => setInfoCell(null)} />
       <ConnectionsListModal
         visible={showConnections}
         connections={connections}
