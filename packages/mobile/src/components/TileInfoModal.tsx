@@ -1,12 +1,26 @@
 import React from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { tileLabel, tileValue, type Cell, type Dataset, type SongTile } from "@chartcross/engine";
+import {
+  explainConnection,
+  tileLabel,
+  tileValue,
+  type Board,
+  type Cell,
+  type Dataset,
+  type MatchableTile,
+  type SongTile,
+} from "@chartcross/engine";
 import { colors } from "../theme";
 
 interface Props {
   cell: Cell | null;
   dataset: Dataset;
+  board: Board;
   onClose: () => void;
+}
+
+function decadeList(decades: number[]): string {
+  return decades.map((d) => `${d}s`).join(", ");
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -14,7 +28,7 @@ const ROLE_LABELS: Record<string, string> = {
   END_ANCHOR: "ANCHOR",
 };
 
-export function TileInfoModal({ cell, dataset, onClose }: Props) {
+export function TileInfoModal({ cell, dataset, board, onClose }: Props) {
   const tile = cell?.tile;
   if (!tile) return null;
 
@@ -62,7 +76,43 @@ export function TileInfoModal({ cell, dataset, onClose }: Props) {
     ];
   } else if (tile.kind === "CONNECTOR") {
     title = tileLabel(tile);
-    rows = [{ label: "Fills a gap between", value: "Two tiles with a matching connection" }];
+    const contentTile = board[tile.contentRow]?.[tile.contentCol]?.tile;
+    const anchorTile = board[tile.anchorRow]?.[tile.anchorCol]?.tile;
+    const isMatchable = (t?: typeof contentTile): t is MatchableTile =>
+      !!t && (t.kind === "SONG" || t.kind === "ARTIST");
+
+    if (isMatchable(contentTile) && isMatchable(anchorTile)) {
+      const explanation = explainConnection(contentTile, anchorTile, tile.connectionType, dataset);
+
+      if (explanation.reason === "DECADE") {
+        rows = [
+          { label: tileLabel(contentTile), value: `Charted in the ${decadeList(explanation.tileADecades)}` },
+          { label: tileLabel(anchorTile), value: `Charted in the ${decadeList(explanation.tileBDecades)}` },
+          {
+            label: explanation.sharedDecades.length > 1 ? "Shared decades" : "Shared decade",
+            value: decadeList(explanation.sharedDecades),
+          },
+        ];
+      } else if (explanation.reason === "COLLAB") {
+        rows = [
+          {
+            label: "Collaborated on",
+            value: explanation.songs.length > 0 ? explanation.songs.map((s) => s.title).join(", ") : "—",
+          },
+        ];
+      } else if (explanation.reason === "ARTIST") {
+        rows = explanation.sharedPerformerNames
+          ? [{ label: "Shared performer", value: explanation.sharedPerformerNames.join(", ") || "—" }]
+          : [
+              {
+                label: explanation.artistName ?? "Performed by",
+                value: explanation.songTitle ? `Performed "${explanation.songTitle}"` : "—",
+              },
+            ];
+      }
+    } else {
+      rows = [{ label: "Fills a gap between", value: "Two tiles with a matching connection" }];
+    }
   } else {
     title = "★ Wildcard";
     rows = [{ label: "Connects to", value: "Anything, worth 0 points" }];

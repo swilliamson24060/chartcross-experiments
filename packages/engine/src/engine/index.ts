@@ -8,3 +8,4 @@ export * from "./rng";
 export * from "./tileValue";
 export * from "./tileLabel";
 export * from "./connections";
+export * from "./explainConnection";
