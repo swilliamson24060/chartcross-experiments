@@ -85,14 +85,21 @@ export function TileInfoModal({ cell, dataset, board, onClose }: Props) {
       const explanation = explainConnection(contentTile, anchorTile, tile.connectionType, dataset);
 
       if (explanation.reason === "DECADE") {
+        const sharedSet = new Set(explanation.sharedDecades);
+        const otherA = explanation.tileADecades.filter((d) => !sharedSet.has(d));
+        const otherB = explanation.tileBDecades.filter((d) => !sharedSet.has(d));
         rows = [
-          { label: tileLabel(contentTile), value: `Charted in the ${decadeList(explanation.tileADecades)}` },
-          { label: tileLabel(anchorTile), value: `Charted in the ${decadeList(explanation.tileBDecades)}` },
           {
-            label: explanation.sharedDecades.length > 1 ? "Shared decades" : "Shared decade",
+            label: explanation.sharedDecades.length > 1 ? "Matched decades" : "Matched decade",
             value: decadeList(explanation.sharedDecades),
           },
         ];
+        if (otherA.length > 0) {
+          rows.push({ label: tileLabel(contentTile), value: `Also charted in the ${decadeList(otherA)}` });
+        }
+        if (otherB.length > 0) {
+          rows.push({ label: tileLabel(anchorTile), value: `Also charted in the ${decadeList(otherB)}` });
+        }
       } else if (explanation.reason === "COLLAB") {
         rows = [
           {
