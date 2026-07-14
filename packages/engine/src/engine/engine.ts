@@ -12,7 +12,7 @@ import {
   tileMatchesMultiplierType,
   wildGapPairing,
 } from "./board";
-import { buildDataIndex, DataIndex, findCandidatesFor } from "./dataIndex";
+import { buildDataIndex, DataIndex, findArtistCandidatesFor, findCollabCandidatesFor } from "./dataIndex";
 import { isStarterPathConnectedToAnchor } from "./graph";
 import { bestConnectionReason, connectionPoints } from "./moves";
 import { createRng, pickRandom, randomInt } from "./rng";
@@ -40,7 +40,8 @@ import {
 } from "./types";
 
 const RACK_SIZE = 5;
-const CONNECTABLE_DRAW_BIAS = 0.8; // probability a refill favors a connectable tile
+const COLLAB_DRAW_CHANCE = 0.1; // probability a refill looks for a COLLAB-connectable tile
+const ARTIST_DRAW_CHANCE = 0.3; // probability a refill looks for an ARTIST-connectable tile
 
 export interface GameState {
   board: Board;
@@ -184,14 +185,7 @@ export class GameEngine {
     return tiles;
   }
 
-  private connectableCandidates(): Tile[] {
-    const placed = this.allPlacedTiles();
-    const merged = new Set<Tile>();
-    for (const p of placed) {
-      for (const c of findCandidatesFor(p, this.dataset, this.index)) {
-        merged.add(c);
-      }
-    }
+  private unusedCandidates(merged: Set<Tile> | Tile[]): Tile[] {
     const result: Tile[] = [];
     for (const t of merged) {
       if (!this.usedIds.has(t.id) && !this.rack.some((r) => r.id === t.id)) {
@@ -199,6 +193,24 @@ export class GameEngine {
       }
     }
     return result;
+  }
+
+  /** Every not-yet-drawn tile that would COLLAB-connect to something already on the board. */
+  private collabCandidates(): Tile[] {
+    const merged = new Set<Tile>();
+    for (const p of this.allPlacedTiles()) {
+      for (const c of findCollabCandidatesFor(p, this.dataset)) merged.add(c);
+    }
+    return this.unusedCandidates(merged);
+  }
+
+  /** Every not-yet-drawn tile that would ARTIST-connect to something already on the board. */
+  private artistCandidates(): Tile[] {
+    const merged = new Set<Tile>();
+    for (const p of this.allPlacedTiles()) {
+      for (const c of findArtistCandidatesFor(p, this.dataset, this.index)) merged.add(c);
+    }
+    return this.unusedCandidates(merged);
   }
 
   /**
@@ -222,11 +234,21 @@ export class GameEngine {
    * Wildcards are never drawn - they're only obtainable via buyWildcard()
    * and only ever usable as a connector (see useWildcardConnector()), not
    * as a rack tile a player places directly.
+   *
+   * The rest of the time (COLLAB_DRAW_CHANCE + ARTIST_DRAW_CHANCE = 40%),
+   * this looks for a tile that would connect to something already on the
+   * board via that specific category, biasing toward a solvable board -
+   * COLLAB is checked first since it's rarer and worth more. Falls through
+   * to a pure random draw whenever the roll misses both, or the biased
+   * pool for that category comes up empty.
    */
   private drawTile(): Tile | null {
-    const useConnectable = this.rng() < CONNECTABLE_DRAW_BIAS;
-    if (useConnectable) {
-      const candidates = this.connectableCandidates();
+    const roll = this.rng();
+    if (roll < COLLAB_DRAW_CHANCE) {
+      const candidates = this.collabCandidates();
+      if (candidates.length > 0) return pickRandom(this.rng, candidates);
+    } else if (roll < COLLAB_DRAW_CHANCE + ARTIST_DRAW_CHANCE) {
+      const candidates = this.artistCandidates();
       if (candidates.length > 0) return pickRandom(this.rng, candidates);
     }
     // Fall back to a pure random draw from the full dataset.

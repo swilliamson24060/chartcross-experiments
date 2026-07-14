@@ -1,68 +1,63 @@
-import { ArtistTile, Dataset, SongTile, Tile } from "./types";
+import { Dataset, SongTile, Tile } from "./types";
 
 export interface DataIndex {
-  byYear: Map<number, Tile[]>;
-  byPeak: Map<number, Tile[]>;
+  /** Every song a given artist ID performed on, keyed by that performer ID. */
+  byPerformer: Map<string, SongTile[]>;
 }
 
-function addTo(map: Map<number, Tile[]>, key: number, tile: Tile) {
+function addTo(map: Map<string, SongTile[]>, key: string, song: SongTile) {
   let bucket = map.get(key);
   if (!bucket) {
     bucket = [];
     map.set(key, bucket);
   }
-  bucket.push(tile);
+  bucket.push(song);
 }
 
 export function buildDataIndex(dataset: Dataset): DataIndex {
-  const byYear = new Map<number, Tile[]>();
-  const byPeak = new Map<number, Tile[]>();
-
+  const byPerformer = new Map<string, SongTile[]>();
   for (const song of dataset.songs) {
-    addTo(byYear, song.peakYear, song);
-    addTo(byPeak, song.peakPos, song);
+    for (const performerId of song.performerIds) {
+      addTo(byPerformer, performerId, song);
+    }
   }
-  for (const artist of dataset.artists) {
-    for (const y of artist.years) addTo(byYear, y, artist);
-    for (const p of artist.peaks) addTo(byPeak, p, artist);
-  }
-  return { byYear, byPeak };
+  return { byPerformer };
 }
 
 /**
- * All tiles that could legally connect to `tile` via ANY rule (year, peak,
- * or collaboration), independent of board geometry. Used to bias rack draws
- * toward a solvable board, not to validate an actual placement.
+ * Every tile that would form a COLLAB connection with `tile` - ARTIST-ARTIST
+ * only, via collaboratorIds (see moves.ts isCollab). A SongTile never has
+ * COLLAB candidates of its own.
  */
-export function findCandidatesFor(
-  tile: Tile,
-  dataset: Dataset,
-  index: DataIndex,
-): Set<Tile> {
+export function findCollabCandidatesFor(tile: Tile, dataset: Dataset): Tile[] {
+  if (tile.kind !== "ARTIST") return [];
+  const result: Tile[] = [];
+  for (const id of tile.collaboratorIds) {
+    const a = dataset.artistById.get(id);
+    if (a) result.push(a);
+  }
+  return result;
+}
+
+/**
+ * Every tile that would form an ARTIST connection with `tile` - shared
+ * performer, via performerIds (see moves.ts isSameArtist): other songs by
+ * the same performer(s), or the performing artist's own tile.
+ */
+export function findArtistCandidatesFor(tile: Tile, dataset: Dataset, index: DataIndex): Set<Tile> {
   const result = new Set<Tile>();
-  if (tile.kind === "WILDCARD" || tile.kind === "CONNECTOR") return result; // no year/peak/collab data to bias toward
-
-  const years = tile.kind === "SONG" ? [tile.peakYear] : tile.years;
-  const peaks = tile.kind === "SONG" ? [tile.peakPos] : tile.peaks;
-  for (const y of years) for (const t of index.byYear.get(y) ?? []) result.add(t);
-  for (const p of peaks) for (const t of index.byPeak.get(p) ?? []) result.add(t);
-
-  if (tile.kind === "ARTIST") {
-    for (const id of tile.collaboratorIds) {
-      const a = dataset.artistById.get(id);
-      if (a) result.add(a);
+  if (tile.kind === "SONG") {
+    for (const performerId of tile.performerIds) {
+      for (const song of index.byPerformer.get(performerId) ?? []) {
+        if (song.id !== tile.id) result.add(song);
+      }
+      const artist = dataset.artistById.get(performerId);
+      if (artist) result.add(artist);
     }
-    for (const id of tile.songIds) {
-      const s = dataset.songById.get(id);
-      if (s) result.add(s);
-    }
-  } else {
-    for (const id of tile.performerIds) {
-      const a = dataset.artistById.get(id);
-      if (a) result.add(a);
+  } else if (tile.kind === "ARTIST") {
+    for (const song of index.byPerformer.get(tile.id) ?? []) {
+      result.add(song);
     }
   }
-
-  result.delete(tile);
   return result;
 }
