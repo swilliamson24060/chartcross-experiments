@@ -11,6 +11,7 @@ import { GRID_SIZE } from "../types";
 import { bestConnectionReason, connectionPoints } from "../moves";
 import { isStarterPathConnectedToAnchor } from "../graph";
 import { GameEngine } from "../engine";
+import { buildDataIndex, findArtistCandidatesFor, findCollabCandidatesFor } from "../dataIndex";
 import { decadePoints, tileValue } from "../tileValue";
 import { getAllConnections } from "../connections";
 import {
@@ -750,6 +751,68 @@ console.log("\nTile value wired into engine scoring:");
     }
   }
   check("Found a move to verify tile-value scoring wiring", placed);
+}
+
+console.log("\nRack draw candidate index checks:");
+{
+  const index = buildDataIndex(dataset);
+  const ladyGaga = findArtist(dataset, "Lady Gaga");
+  const brunoMars = findArtist(dataset, "Bruno Mars");
+  const dieWithASmile = findSong(dataset, "Die With A Smile", "Lady Gaga");
+
+  const collabForArtist = findCollabCandidatesFor(ladyGaga, dataset);
+  check("findCollabCandidatesFor(Lady Gaga) includes Bruno Mars", collabForArtist.some((t) => t.id === brunoMars.id));
+  check("findCollabCandidatesFor never returns candidates for a SONG tile", findCollabCandidatesFor(dieWithASmile, dataset).length === 0);
+
+  const artistForSong = [...findArtistCandidatesFor(dieWithASmile, dataset, index)];
+  check("findArtistCandidatesFor(Die With A Smile) includes Lady Gaga", artistForSong.some((t) => t.id === ladyGaga.id));
+  check("findArtistCandidatesFor(Die With A Smile) includes Bruno Mars", artistForSong.some((t) => t.id === brunoMars.id));
+  check("findArtistCandidatesFor(Die With A Smile) doesn't include the song itself", !artistForSong.some((t) => t.id === dieWithASmile.id));
+
+  const artistForArtist = [...findArtistCandidatesFor(ladyGaga, dataset, index)];
+  check("findArtistCandidatesFor(Lady Gaga) includes Die With A Smile", artistForArtist.some((t) => t.id === dieWithASmile.id));
+}
+
+console.log("\nRack draw bias checks:");
+{
+  // The starting rack is drawn entirely against the same two-tile board
+  // (STARTER + END_ANCHOR only) for every seed, so it's a clean, consistent
+  // sample to check drawTile()'s COLLAB_DRAW_CHANCE/ARTIST_DRAW_CHANCE
+  // split against - independently recomputed here via the same exported
+  // candidate functions the engine itself uses.
+  const index = buildDataIndex(dataset);
+  let collabHits = 0;
+  let artistHits = 0;
+  let total = 0;
+
+  for (let seed = 0; seed < 400; seed++) {
+    const engine = new GameEngine(dataset, 1, seed);
+    const state = engine.getState();
+    const placed = [state.board[GRID_SIZE - 1][0].tile!, state.board[0][GRID_SIZE - 1].tile!];
+
+    const collabIds = new Set<string>();
+    const artistIds = new Set<string>();
+    for (const p of placed) {
+      for (const c of findCollabCandidatesFor(p, dataset)) collabIds.add(c.id);
+      for (const c of findArtistCandidatesFor(p, dataset, index)) artistIds.add(c.id);
+    }
+
+    for (const tile of state.rack) {
+      total++;
+      if (collabIds.has(tile.id)) collabHits++;
+      else if (artistIds.has(tile.id)) artistHits++;
+    }
+  }
+
+  const collabRate = collabHits / total;
+  const artistRate = artistHits / total;
+  console.log(
+    `  (info) of ${total} starting-rack draws: ${(collabRate * 100).toFixed(1)}% landed in the collab pool, ${(artistRate * 100).toFixed(1)}% in the artist pool`,
+  );
+  check("Collab-pool draw rate is roughly the intended 10% (within [3%, 20%])", collabRate >= 0.03 && collabRate <= 0.2);
+  check("Artist-pool draw rate is roughly the intended 30% (within [20%, 42%])", artistRate >= 0.2 && artistRate <= 0.42);
+  check("At least some draws land in the collab pool", collabHits > 0);
+  check("At least some draws land in the artist pool", artistHits > 0);
 }
 
 console.log("\nGame-ending status checks:");
